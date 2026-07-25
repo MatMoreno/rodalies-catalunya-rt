@@ -237,14 +237,16 @@
         ? `<span class="tag-prog">Todavía en ${esc(s.origen)}</span>`
         : !s.proxima ? ""
         // Si su próxima parada es esta, es el que está entrando: dilo así.
-        : s.proxima === datos?.parada?.name ? `<b>Llegando a esta parada</b>`
-        : `Llegando a ${esc(s.proxima)}`;
+        : s.proxima === datos?.parada?.name ? `<span><b>Llegando a esta parada</b></span>`
+        : `<span>Llegando a ${esc(s.proxima)}</span>`;
 
+      // Cada dato va en su propio <span> y los puntos de separación los pone el
+      // CSS: así se puede ocultar uno en móvil sin que queden puntos huérfanos.
       const sub = [
         donde,
         `<span class="dep__num">tren ${esc(s.tren)}</span>`,
-        s.accesible ? "♿" : "",
-      ].filter(Boolean).join(`<span class="sep">·</span>`);
+        s.accesible ? `<span title="Tren accesible">♿</span>` : "",
+      ].filter(Boolean).join("");
 
       return `<article class="dep ${m != null && m <= 3 && s.estado === "circulando" ? "is-soon" : ""}
                    ${s.estado === "programado" ? "is-prog" : ""} ${s.cancelado ? "is-cancel" : ""}">
@@ -283,7 +285,10 @@
 
       // Sin filtro de sentido, los trenes van agrupados por dirección: mezclarlos
       // obliga a saberse el orden de las paradas para saber cuál te sirve.
-      const dirs = [...new Set(lista.map((s) => s.sentido?.hacia).filter(Boolean))];
+      // Orden alfabético, no por hora del primer tren: si no, los dos bloques se
+      // intercambian de sitio entre refrescos y pierdes de vista el tuyo.
+      const dirs = [...new Set(lista.map((s) => s.sentido?.hacia).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, "ca"));
       if (sentidoSel || dirs.length < 2) {
         cont.innerHTML = lista.map(filaHTML).join("");
         return;
