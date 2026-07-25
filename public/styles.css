@@ -345,6 +345,195 @@ a.linecard:hover .linecard__go { transform: translateX(3px); color: var(--ink); 
 @keyframes shimmer { to { transform: translateX(100%); } }
 
 /* -------------------------------------------------------------------------
+   Panel de parada (vista principal): "¿cuándo pasa mi tren?"
+   La respuesta —los minutos que faltan— manda tipográficamente sobre todo lo
+   demás; la hora de reloj queda de apoyo, como en la andana.
+   ------------------------------------------------------------------------- */
+
+/* Buscador de estación */
+.picker { position: relative; max-width: 460px; }
+.picker__field {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--paper);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-pill);
+  padding: 11px 16px;
+  box-shadow: var(--sh-1);
+  transition: border-color .15s, box-shadow .15s;
+}
+.picker__field:focus-within { border-color: var(--ink-3); box-shadow: var(--sh-2); }
+.picker__icon { color: var(--ink-3); flex: 0 0 auto; font-size: 15px; }
+.picker__input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: none;
+  font: inherit; font-weight: 600; color: var(--ink);
+}
+.picker__input::placeholder { color: var(--ink-3); font-weight: 500; }
+.picker__clear {
+  border: none; background: none; cursor: pointer; padding: 2px 4px;
+  color: var(--ink-3); font-size: 17px; line-height: 1; flex: 0 0 auto;
+}
+.picker__clear:hover { color: var(--ink); }
+
+.picker__list {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0;
+  max-height: 320px; overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-2);
+  padding: 6px;
+  margin: 0; list-style: none;
+}
+.picker__list[hidden] { display: none; }
+.picker__opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: var(--r-sm);
+  cursor: pointer; min-width: 0;
+}
+.picker__opt:hover, .picker__opt.is-on { background: var(--wash); }
+.picker__opt b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker__opt .picker__lines { margin-left: auto; display: flex; gap: 4px; flex: 0 0 auto; }
+.picker__empty { padding: 14px; color: var(--ink-3); font-size: 13.5px; text-align: center; }
+
+/* Cabecera de la parada elegida */
+.stophero { margin-top: 26px; }
+.stophero__name {
+  margin: 0;
+  font-family: var(--font-display); font-weight: 800;
+  font-size: clamp(1.9rem, 5.5vw, 3rem); line-height: 1.03; letter-spacing: -.02em;
+}
+.stophero__meta {
+  margin: 10px 0 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 13px; color: var(--ink-2);
+}
+.stophero__meta .clock { font-family: var(--font-mono); font-weight: 600; }
+.a11y-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--ok-bg); color: var(--ok-ink);
+  font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-pill);
+}
+
+/* Filtros: sentido y línea */
+.filters { display: grid; gap: 8px; margin-top: 18px; }
+.filtrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.filtrow__lbl {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-3); margin-right: 4px; min-width: 52px;
+}
+.chip {
+  border: 1px solid var(--hair-2); background: var(--paper);
+  border-radius: var(--r-pill); padding: 6px 13px;
+  font: inherit; font-size: 13px; font-weight: 700; color: var(--ink-2);
+  cursor: pointer; transition: background .13s, color .13s, border-color .13s;
+}
+.chip:hover { background: var(--wash-2); }
+.chip.is-on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+/* Lista de salidas */
+.deps { display: grid; gap: 8px; margin-top: 18px; }
+.dep {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center; gap: 14px;
+  background: var(--paper);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  padding: 13px 16px;
+  box-shadow: var(--sh-1);
+  min-width: 0;
+}
+.dep.is-soon { border-color: var(--hair-2); box-shadow: var(--sh-2); }
+.dep.is-prog { background: color-mix(in srgb, var(--paper) 70%, var(--wash)); }
+.dep.is-cancel { border-left: 4px solid var(--alert); }
+
+/* Cabecera de grupo por sentido: separa los dos lados de la línea, que es lo
+   que decide si un tren te sirve. */
+.dirhead {
+  margin: 18px 0 2px;
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 14px; letter-spacing: .02em;
+  color: var(--ink-2);
+}
+.dirhead:first-child { margin-top: 0; }
+.dirhead__arrow {
+  display: inline-grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 7px;
+  background: var(--ink); color: #fff; font-size: 13px; line-height: 1;
+}
+
+.dep__body { min-width: 0; }
+.dep__lbl {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 1px;
+}
+.dep__dest {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: clamp(1rem, 2.6vw, 1.22rem); letter-spacing: -.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dep__sub {
+  margin-top: 2px; font-size: 12.5px; color: var(--ink-3);
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0;
+}
+.dep__sub .sep { color: var(--hair-2); }
+.dep__num { font-family: var(--font-mono); }
+
+/* Ancho fijo en las dos columnas de la derecha: cada fila es una rejilla propia,
+   así que sin esto las horas bailan de una fila a otra según haya vía o no. */
+.dep__plat { text-align: center; flex: 0 0 auto; width: 44px; }
+.dep__plat b {
+  display: block; font-family: var(--font-mono); font-weight: 600;
+  font-size: 17px; color: var(--ink);
+}
+.dep__plat span { display: block; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+
+.dep__times { text-align: right; flex: 0 0 auto; width: 132px; }
+.dep__min {
+  font-family: var(--font-display); font-weight: 800;
+  font-size: 1.6rem; line-height: 1; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.dep__min small { font-size: .5em; font-weight: 700; color: var(--ink-3); margin-left: 2px; }
+.dep.is-soon .dep__min { color: var(--ok); }
+.dep__clock {
+  margin-top: 4px; font-family: var(--font-mono); font-weight: 500;
+  font-size: 13px; color: var(--ink-2);
+  display: flex; align-items: center; gap: 6px; justify-content: flex-end;
+}
+.dep__was { text-decoration: line-through; color: var(--ink-3); }
+.dep__delay {
+  font-family: var(--font-ui); font-weight: 700; font-size: 11.5px;
+  background: var(--delay-bg); color: var(--delay-ink);
+  padding: 1px 6px; border-radius: var(--r-pill);
+}
+.dep__ontime { font-family: var(--font-ui); font-weight: 700; font-size: 11.5px; color: var(--ok-ink); }
+.dep__cancel {
+  font-family: var(--font-ui); font-weight: 700; font-size: 11.5px;
+  background: var(--alert-bg); color: var(--alert-ink);
+  padding: 1px 6px; border-radius: var(--r-pill);
+}
+/* Sin versalitas: con nombres largos ("Todavía en L'Hospitalet de Llobregat")
+   las mayúsculas gritan y cuestan de leer. */
+.tag-prog {
+  font-size: 11.5px; font-weight: 700;
+  color: var(--ink-3); background: var(--wash-2); padding: 2px 7px; border-radius: var(--r-pill);
+}
+
+@media (max-width: 560px) {
+  .dep { grid-template-columns: auto minmax(0, 1fr) auto; gap: 11px; padding: 12px 13px; }
+  .dep__plat { display: none; }
+  .dep__times { width: 82px; }
+  .dep__min { font-size: 1.4rem; }
+  /* El destino es el dato que se busca: antes que recortarlo, que use dos líneas. */
+  .dep__dest {
+    white-space: normal; font-size: 1rem; line-height: 1.2;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+}
+
+/* -------------------------------------------------------------------------
    Pie
    ------------------------------------------------------------------------- */
 .foot {

@@ -173,7 +173,8 @@
       <span class="brand__txt"><b>Rodalies</b><span>Catalunya</span></span>
     </a>
     <nav class="topbar__nav">
-      <a href="/" class="navlink">Estado</a>
+      <a href="/" class="navlink">Mi parada</a>
+      <a href="/estado.html" class="navlink">Estado</a>
       <a href="/linea.html" class="navlink is-active">Trenes en vivo</a>
     </nav>
     <div class="topbar__meta">
@@ -427,17 +428,23 @@
       root.setProperty("--rail-node", tint(lc, 0.55));
 
       const head = document.getElementById("linehead");
-      const hora = new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+      // La hora la pone la API, no esta máquina: si el servidor no está en la
+      // zona horaria de Barcelona, el reloj del navegador no casa con los horarios.
+      const hora = data.ahora || new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+      const pendientes = (data.proximas_salidas || []).length;
       const trenesTxt = n
         ? `<b style="color:var(--ok)">${n}</b> tren${n === 1 ? "" : "es"} circulando`
         : `sin circulación ahora`;
+      const salidasTxt = pendientes
+        ? ` · ${pendientes} salida${pendientes === 1 ? "" : "s"} programada${pendientes === 1 ? "" : "s"}`
+        : "";
       const demoTag = demo ? `<span class="badge-demo">DEMO</span>` : "";
       head.innerHTML = `
         <div class="linehead__main">
           <span class="bullet bullet--lg" style="background:${lc};color:${textOn(lc)}">${esc(data.linea.id)}</span>
           <div>
             <div class="linehead__route">${esc(data.linea.origin || "")}<span class="arrow">↔</span>${esc(data.linea.destination || "")}</div>
-            <div class="linehead__meta">${trenesTxt} · actualizado ${hora}${demoTag}</div>
+            <div class="linehead__meta">${trenesTxt}${salidasTxt} · actualizado ${hora}${demoTag}</div>
           </div>
         </div>
         <div class="linehead__legend">

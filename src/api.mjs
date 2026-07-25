@@ -77,6 +77,38 @@ export async function getLine(id) {
   });
 }
 
+// Catálogo completo de estaciones (202), con las líneas que paran en cada una.
+// Se cachea 1 h.
+//
+// OJO con la paginación: el parámetro es `page`, NO `offset` — mandar `offset`
+// se ignora en silencio y devuelve la primera página una y otra vez. Con un
+// `limit` holgado entra todo en una sola llamada; el bucle queda por seguridad.
+export async function getStations() {
+  return cacheStatic("stations", async () => {
+    // Las `connections` mezclan líneas de Rodalies con metro/tranvía ("L9 Sud"),
+    // así que se filtran contra el catálogo real de líneas.
+    const validas = new Set((await getLines()).map((l) => l.id));
+    const porId = new Map();
+    const LIMIT = 250;
+    for (let page = 0; page < 10; page++) {
+      const j = await getJson(`/stations?limit=${LIMIT}&page=${page}&lang=ca`);
+      const arr = j.included || j.data || [];
+      for (const s of arr) {
+        porId.set(String(s.id), {
+          id: String(s.id),
+          name: s.name,
+          accessible: !!s.accessible,
+          lat: s.latitude ?? null,
+          lon: s.longitude ?? null,
+          lineas: [...new Set((s.connections || []).map((c) => c.id).filter((id) => validas.has(id)))],
+        });
+      }
+      if (j.last || arr.length < LIMIT) break;
+    }
+    return [...porId.values()].sort((a, b) => a.name.localeCompare(b.name, "ca"));
+  });
+}
+
 // Salidas EN VIVO de una estación (cada tren con su recorrido completo).
 export async function getDepartures(stationId) {
   return cacheLive("dep:" + stationId, async () => {

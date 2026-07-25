@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#eef2f6" />
+  <title>Rodalies Catalunya · Estado del servicio en tiempo real</title>
+  <meta name="description" content="Estado en tiempo real del servicio e incidencias por línea de Rodalies de Catalunya." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Rodalies Catalunya · inicio">
+      <span class="brand__mark">R</span>
+      <span class="brand__txt"><b>Rodalies</b><span>Catalunya</span></span>
+    </a>
+    <nav class="topbar__nav">
+      <a href="/" class="navlink">Mi parada</a>
+      <a href="/estado.html" class="navlink is-active">Estado</a>
+      <a href="/linea.html" class="navlink">Trenes en vivo</a>
+    </nav>
+    <div class="topbar__meta">
+      <span class="live" id="live"><span class="live__dot"></span><span>En vivo</span></span>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- Tablero de estado de la red -->
+    <section class="board rise" id="board" data-state="loading" aria-live="polite">
+      <p class="board__eyebrow">Estado de la red · <span class="clock" id="clock">--:--</span></p>
+      <h1 class="board__headline" id="headline">Comprobando el estado…</h1>
+      <p class="board__sub" id="subhead">Leyendo el feed en tiempo real de Renfe.</p>
+      <div class="netstrip" id="netstrip" role="list" aria-label="Estado de cada línea"></div>
+      <p class="netstrip__legend">
+        <span class="k k--ok">Con normalidad</span>
+        <span class="k k--inc">Con incidencias</span>
+      </p>
+    </section>
+
+    <!-- Incidencias activas -->
+    <section class="section rise rise-2" id="sec-inc">
+      <div class="section__head">
+        <h2>Incidencias activas</h2>
+        <span class="section__count" id="inc-count" hidden></span>
+      </div>
+      <div id="incidencias" class="inc-list">
+        <div class="skeleton sk-card" style="height:120px"></div>
+        <div class="skeleton sk-card" style="height:120px"></div>
+      </div>
+    </section>
+
+    <!-- Todas las líneas -->
+    <section class="section rise rise-3">
+      <div class="section__head">
+        <h2>Todas las líneas</h2>
+        <span class="section__hint">Toca una línea para ver sus trenes en vivo</span>
+      </div>
+      <div class="linegrid" id="lineas">
+        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Fuente: GTFS-Realtime de Renfe (<code>alerts.pb</code>, núcleo 51). Se actualiza cada 30 s.
+    Las posiciones de tren en vivo salen de la <a href="/linea.html">API oficial de Rodalies</a>;
+    en esta vista solo se muestra el estado y las incidencias por línea.
+  </footer>
+
+  <script src="/shared.js"></script>
+  <script>
+    const { color, esc, bullet, timeAgo, clockAt, getJSON } = window.RR;
+
+    let liveCodes = new Set();   // líneas con vista "en vivo" disponible
+    let lastUpdate = 0;
+
+    function setLive(ok) {
+      const el = document.getElementById("live");
+      el.classList.toggle("is-error", !ok);
+      el.querySelector("span:last-child").textContent = ok ? "En vivo" : "Sin conexión";
+    }
+
+    function pintarBoard(estado, nIncidencias) {
+      const board = document.getElementById("board");
+      const total = estado.lineas.length;
+      const n = estado.con_incidencias;
+      const ok = total - n;
+      const head = document.getElementById("headline");
+      const sub = document.getElementById("subhead");
+
+      if (n === 0) {
+        board.dataset.state = "normal";
+        head.innerHTML = `<span class="accent">Toda la red</span> funciona con normalidad`;
+        sub.innerHTML = `Las <b>${total}</b> líneas de Rodalies circulan sin incidencias activas.`;
+      } else {
+        board.dataset.state = "incidencia";
+        head.innerHTML = `Circulación afectada en <span class="accent">${n} línea${n === 1 ? "" : "s"}</span>`;
+        const avisos = nIncidencias
+          ? ` · <b>${nIncidencias}</b> aviso${nIncidencias === 1 ? "" : "s"} activo${nIncidencias === 1 ? "" : "s"}`
+          : "";
+        sub.innerHTML = `<b>${ok}</b> de ${total} líneas circulan con normalidad${avisos}.`;
+      }
+
+      // Sparkline: un tick por línea (verde normal · rojo incidencia).
+      const strip = document.getElementById("netstrip");
+      strip.innerHTML = estado.lineas.map((l) => {
+        const inc = l.estado === "incidencia";
+        const live = liveCodes.has(l.linea);
+        return `<button class="tick ${inc ? "is-inc" : ""}" role="listitem"
+          ${live ? `data-l="${esc(l.linea)}"` : "disabled"}
+          title="${esc(l.linea)} · ${inc ? "con incidencias" : "normal"}"
+          aria-label="${esc(l.linea)} ${inc ? "con incidencias" : "normal"}"></button>`;
+      }).join("");
+      strip.querySelectorAll(".tick[data-l]").forEach((b) => {
+        b.onclick = () => (location.href = `/linea.html?l=${encodeURIComponent(b.dataset.l)}`);
+      });
+    }
+
+    function pintarLineas(estado) {
+      const cont = document.getElementById("lineas");
+      cont.innerHTML = estado.lineas.map((l) => {
+        const inc = l.estado === "incidencia";
+        const live = liveCodes.has(l.linea);
+        const tag = live ? "a" : "div";
+        const href = live ? ` href="/linea.html?l=${encodeURIComponent(l.linea)}"` : "";
+        const nota = inc && l.incidencias?.[0]?.texto
+          ? `<div class="linecard__note" title="${esc(l.incidencias[0].texto)}">${esc(l.incidencias[0].texto)}</div>`
+          : "";
+        return `<${tag} class="linecard ${inc ? "is-inc" : ""}"${href}>
+          ${bullet(l.linea, "md")}
+          <div class="linecard__body">
+            <div class="linecard__status ${inc ? "inc" : "ok"}">
+              <span class="dot ${inc ? "dot--inc" : "dot--ok"}"></span>
+              ${inc ? "Con incidencias" : "Circula con normalidad"}
+            </div>
+            ${nota}
+          </div>
+          ${live ? `<span class="linecard__go" aria-hidden="true">→</span>` : ""}
+        </${tag}>`;
+      }).join("");
+    }
+
+    function pintarIncidencias(data) {
+      const sec = document.getElementById("sec-inc");
+      const cont = document.getElementById("incidencias");
+      const count = document.getElementById("inc-count");
+      const activas = data.incidencias
+        .filter((i) => i.vigente)
+        .sort((a, b) => (b.inicio || 0) - (a.inicio || 0));
+
+      if (!activas.length) {
+        sec.hidden = false;
+        count.hidden = true;
+        cont.innerHTML = `<div class="empty">
+          <div class="empty__icon">✓</div>
+          <p><b>Sin incidencias activas.</b><br>Toda la red circula con normalidad ahora mismo.</p>
+        </div>`;
+        return;
+      }
+
+      sec.hidden = false;
+      count.hidden = false;
+      count.textContent = `${activas.length} activa${activas.length === 1 ? "" : "s"}`;
+
+      cont.innerHTML = activas.map((i) => {
+        const MAX = 8;
+        const bullets = i.lineas.slice(0, MAX).map((l) => bullet(l, "sm")).join("");
+        const extra = i.lineas.length > MAX ? `<span class="incident__more">+${i.lineas.length - MAX}</span>` : "";
+        const desde = i.inicio ? `Activa · empezó ${timeAgo(i.inicio)}` : "Activa";
+        const hasta = i.fin ? ` · hasta ${clockAt(i.fin)}` : "";
+        const alt = i.texto_alt?.[0]
+          ? `<details class="incident__alt"><summary>Versió en català</summary><p>${esc(i.texto_alt[0])}</p></details>`
+          : "";
+        return `<article class="incident">
+          <div class="incident__head">
+            <div class="incident__lines">${bullets}</div>${extra}
+            <span class="incident__time">${desde}${hasta}</span>
+          </div>
+          <p class="incident__text">${esc(i.texto)}</p>
+          ${alt}
+        </article>`;
+      }).join("");
+    }
+
+    function tickClock() {
+      document.getElementById("clock").textContent =
+        lastUpdate ? `actualizado ${timeAgo(lastUpdate / 1000)}` : new Date().toLocaleTimeString("es-ES");
+    }
+
+    async function refrescar() {
+      try {
+        // El catálogo de líneas (para saber cuáles tienen vista en vivo) puede fallar
+        // fuera de horario; se tolera y se sigue solo con el estado.
+        const [estado, inc, lineas] = await Promise.all([
+          getJSON("/api/estado"),
+          getJSON("/api/incidencias"),
+          getJSON("/api/lineas").catch(() => ({ lineas: [] })),
+        ]);
+        liveCodes = new Set(lineas.lineas.map((l) => l.id));
+        pintarBoard(estado, inc.incidencias.filter((x) => x.vigente).length);
+        pintarLineas(estado);
+        pintarIncidencias(inc);
+        lastUpdate = Date.now();
+        tickClock();
+        setLive(true);
+      } catch (e) {
+        setLive(false);
+        const sub = document.getElementById("subhead");
+        if (!lastUpdate) {
+          document.getElementById("headline").textContent = "No se pudo leer el feed";
+          sub.textContent = "Reintentando en unos segundos…";
+          document.getElementById("board").dataset.state = "loading";
+        }
+      }
+    }
+
+    refrescar();
+    setInterval(refrescar, 30_000);
+    setInterval(tickClock, 10_000);
+  </script>
+</body>
+</html>

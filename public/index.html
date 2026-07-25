@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#eef2f6" />
-  <title>Rodalies Catalunya · Estado del servicio en tiempo real</title>
-  <meta name="description" content="Estado en tiempo real del servicio e incidencias por línea de Rodalies de Catalunya." />
+  <title>Rodalies Catalunya · Próximos trenes desde tu parada</title>
+  <meta name="description" content="A qué hora pasa tu tren por tu estación de Rodalies de Catalunya, en tiempo real." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
@@ -18,7 +18,8 @@
       <span class="brand__txt"><b>Rodalies</b><span>Catalunya</span></span>
     </a>
     <nav class="topbar__nav">
-      <a href="/" class="navlink is-active">Estado</a>
+      <a href="/" class="navlink is-active">Mi parada</a>
+      <a href="/estado.html" class="navlink">Estado</a>
       <a href="/linea.html" class="navlink">Trenes en vivo</a>
     </nav>
     <div class="topbar__meta">
@@ -27,200 +28,339 @@
   </header>
 
   <main class="page">
-    <!-- Tablero de estado de la red -->
-    <section class="board rise" id="board" data-state="loading" aria-live="polite">
-      <p class="board__eyebrow">Estado de la red · <span class="clock" id="clock">--:--</span></p>
-      <h1 class="board__headline" id="headline">Comprobando el estado…</h1>
-      <p class="board__sub" id="subhead">Leyendo el feed en tiempo real de Renfe.</p>
-      <div class="netstrip" id="netstrip" role="list" aria-label="Estado de cada línea"></div>
-      <p class="netstrip__legend">
-        <span class="k k--ok">Con normalidad</span>
-        <span class="k k--inc">Con incidencias</span>
-      </p>
+    <section class="rise">
+      <div class="picker" id="picker">
+        <div class="picker__field">
+          <span class="picker__icon" aria-hidden="true">⌕</span>
+          <input class="picker__input" id="q" type="text" role="combobox"
+                 aria-expanded="false" aria-controls="opts" aria-autocomplete="list"
+                 placeholder="Busca tu estación…" autocomplete="off" />
+          <button class="picker__clear" id="clear" type="button" aria-label="Borrar" hidden>×</button>
+        </div>
+        <ul class="picker__list" id="opts" role="listbox" aria-label="Estaciones" hidden></ul>
+      </div>
+
+      <div class="stophero" id="hero" hidden>
+        <h1 class="stophero__name" id="stop-name"></h1>
+        <p class="stophero__meta">
+          <span id="stop-lines"></span>
+          <span class="clock" id="clock"></span>
+          <span id="stop-a11y"></span>
+        </p>
+      </div>
+
+      <div class="filters" id="filters"></div>
     </section>
 
-    <!-- Incidencias activas -->
-    <section class="section rise rise-2" id="sec-inc">
+    <section class="section" id="sec-deps" style="margin-top:22px">
       <div class="section__head">
-        <h2>Incidencias activas</h2>
-        <span class="section__count" id="inc-count" hidden></span>
+        <h2 id="deps-title">Próximos trenes</h2>
+        <span class="section__hint" id="deps-hint"></span>
       </div>
-      <div id="incidencias" class="inc-list">
-        <div class="skeleton sk-card" style="height:120px"></div>
-        <div class="skeleton sk-card" style="height:120px"></div>
-      </div>
-    </section>
-
-    <!-- Todas las líneas -->
-    <section class="section rise rise-3">
-      <div class="section__head">
-        <h2>Todas las líneas</h2>
-        <span class="section__hint">Toca una línea para ver sus trenes en vivo</span>
-      </div>
-      <div class="linegrid" id="lineas">
-        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
-        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
-        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+      <div class="deps" id="deps">
+        <div class="empty">
+          <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">⌕</div>
+          <p><b>Elige tu estación.</b><br>Te digo a qué hora pasa cada tren y cuántos minutos faltan.</p>
+        </div>
       </div>
     </section>
   </main>
 
   <footer class="foot">
-    Fuente: GTFS-Realtime de Renfe (<code>alerts.pb</code>, núcleo 51). Se actualiza cada 30 s.
-    Las posiciones de tren en vivo salen de la <a href="/linea.html">API oficial de Rodalies</a>;
-    en esta vista solo se muestra el estado y las incidencias por línea.
+    Horarios en vivo de la <a href="https://serveisgrs.rodalies.gencat.cat/api" rel="noreferrer">API oficial de Rodalies</a> (Generalitat).
+    Las horas mostradas ya incluyen el retraso; <b>prevista</b> es la de horario.
+    Para el estado general de la red mira <a href="/estado.html">incidencias</a>, y para ver los trenes sobre el trazado, <a href="/linea.html">trenes en vivo</a>.
   </footer>
 
   <script src="/shared.js"></script>
   <script>
-    const { color, esc, bullet, timeAgo, clockAt, getJSON } = window.RR;
+    const { esc, bullet, getJSON } = window.RR;
 
-    let liveCodes = new Set();   // líneas con vista "en vivo" disponible
-    let lastUpdate = 0;
+    let paradas = [];        // catálogo completo
+    let sel = null;          // parada elegida
+    let filtro = null;       // línea filtrada
+    let sentidoSel = null;   // dirección filtrada (nombre del extremo de línea)
+    let datos = null;        // última respuesta
+    let baseMs = 0;          // reloj del cliente al recibirla (para descontar minutos)
+    let marcado = -1;        // opción resaltada en el buscador
+
+    const $ = (id) => document.getElementById(id);
+    // NFD separa la tilde en marca combinante y \p{M} la quita: así "sant adria"
+    // encuentra "Sant Adrià" y "macanet" encuentra "Maçanet".
+    const norm = (s) => (s || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
     function setLive(ok) {
-      const el = document.getElementById("live");
+      const el = $("live");
       el.classList.toggle("is-error", !ok);
       el.querySelector("span:last-child").textContent = ok ? "En vivo" : "Sin conexión";
     }
 
-    function pintarBoard(estado, nIncidencias) {
-      const board = document.getElementById("board");
-      const total = estado.lineas.length;
-      const n = estado.con_incidencias;
-      const ok = total - n;
-      const head = document.getElementById("headline");
-      const sub = document.getElementById("subhead");
+    /* ---------------------------------------------------------------- buscador */
 
-      if (n === 0) {
-        board.dataset.state = "normal";
-        head.innerHTML = `<span class="accent">Toda la red</span> funciona con normalidad`;
-        sub.innerHTML = `Las <b>${total}</b> líneas de Rodalies circulan sin incidencias activas.`;
+    function opciones(texto) {
+      const t = norm(texto.trim());
+      const lista = t ? paradas.filter((p) => norm(p.name).includes(t)) : paradas.slice(0, 12);
+      // Las que empiezan por el texto, primero.
+      if (t) lista.sort((a, b) => (norm(b.name).startsWith(t) ? 1 : 0) - (norm(a.name).startsWith(t) ? 1 : 0));
+      return lista.slice(0, 40);
+    }
+
+    function pintarOpciones(texto) {
+      const ul = $("opts");
+      const lista = opciones(texto);
+      marcado = -1;
+      if (!lista.length) {
+        ul.innerHTML = `<li class="picker__empty">Ninguna estación coincide con “${esc(texto)}”.</li>`;
       } else {
-        board.dataset.state = "incidencia";
-        head.innerHTML = `Circulación afectada en <span class="accent">${n} línea${n === 1 ? "" : "s"}</span>`;
-        const avisos = nIncidencias
-          ? ` · <b>${nIncidencias}</b> aviso${nIncidencias === 1 ? "" : "s"} activo${nIncidencias === 1 ? "" : "s"}`
-          : "";
-        sub.innerHTML = `<b>${ok}</b> de ${total} líneas circulan con normalidad${avisos}.`;
+        ul.innerHTML = lista.map((p, i) => `
+          <li class="picker__opt" role="option" aria-selected="false" data-id="${esc(p.id)}" data-i="${i}">
+            <b>${esc(p.name)}</b>
+            <span class="picker__lines">${p.lineas.slice(0, 4).map((l) => bullet(l, "sm")).join("")}</span>
+          </li>`).join("");
+        ul.querySelectorAll(".picker__opt").forEach((li) => {
+          li.onmousedown = (e) => { e.preventDefault(); elegir(li.dataset.id); };
+        });
       }
+      ul.hidden = false;
+      $("q").setAttribute("aria-expanded", "true");
+    }
 
-      // Sparkline: un tick por línea (verde normal · rojo incidencia).
-      const strip = document.getElementById("netstrip");
-      strip.innerHTML = estado.lineas.map((l) => {
-        const inc = l.estado === "incidencia";
-        const live = liveCodes.has(l.linea);
-        return `<button class="tick ${inc ? "is-inc" : ""}" role="listitem"
-          ${live ? `data-l="${esc(l.linea)}"` : "disabled"}
-          title="${esc(l.linea)} · ${inc ? "con incidencias" : "normal"}"
-          aria-label="${esc(l.linea)} ${inc ? "con incidencias" : "normal"}"></button>`;
-      }).join("");
-      strip.querySelectorAll(".tick[data-l]").forEach((b) => {
-        b.onclick = () => (location.href = `/linea.html?l=${encodeURIComponent(b.dataset.l)}`);
+    function cerrarOpciones() {
+      $("opts").hidden = true;
+      $("q").setAttribute("aria-expanded", "false");
+    }
+
+    function mover(paso) {
+      const items = [...$("opts").querySelectorAll(".picker__opt")];
+      if (!items.length) return;
+      if (marcado >= 0) items[marcado].classList.remove("is-on");
+      marcado = (marcado + paso + items.length) % items.length;
+      items[marcado].classList.add("is-on");
+      items[marcado].scrollIntoView({ block: "nearest" });
+    }
+
+    /* ------------------------------------------------------------ selección */
+
+    function elegir(id) {
+      const p = paradas.find((x) => x.id === String(id));
+      if (!p) return;
+      sel = p;
+      filtro = null;
+      sentidoSel = null;
+      localStorage.setItem("parada", p.id);
+      history.replaceState(null, "", `?p=${encodeURIComponent(p.id)}`);
+      $("q").value = "";
+      $("clear").hidden = true;
+      cerrarOpciones();
+      $("q").blur();
+
+      $("hero").hidden = false;
+      $("stop-name").textContent = p.name;
+      $("stop-lines").innerHTML = p.lineas.map((l) => bullet(l, "sm")).join(" ");
+      $("stop-a11y").innerHTML = p.accessible
+        ? `<span class="a11y-tag">♿ Accesible</span>` : "";
+      datos = null;
+      pintarFiltros();
+      $("deps").innerHTML = `<div class="skeleton sk-card" style="height:74px"></div>
+        <div class="skeleton sk-card" style="height:74px"></div>
+        <div class="skeleton sk-card" style="height:74px"></div>`;
+      cargar();
+    }
+
+    // Dos filas de filtros: primero el sentido (que es lo que decide si un tren te
+    // sirve o no) y debajo la línea, si la parada tiene más de una.
+    function pintarFiltros() {
+      const cont = $("filters");
+      if (!sel) { cont.innerHTML = ""; return; }
+      const chip = (activo, val, txt, attr) =>
+        `<button class="chip ${activo ? "is-on" : ""}" ${attr}="${esc(val ?? "")}">${txt}</button>`;
+
+      let html = "";
+      const sentidos = datos?.sentidos || [];
+      if (sentidos.length > 1) {
+        html += `<div class="filtrow">
+          <span class="filtrow__lbl">Sentido</span>
+          ${chip(!sentidoSel, null, "Los dos", "data-s")}
+          ${sentidos.map((s) => chip(sentidoSel === s.hacia, s.hacia, esc(s.hacia), "data-s")).join("")}
+        </div>`;
+      }
+      if (sel.lineas.length > 1) {
+        html += `<div class="filtrow">
+          <span class="filtrow__lbl">Línea</span>
+          ${chip(!filtro, null, "Todas", "data-l")}
+          ${sel.lineas.map((l) => chip(filtro === l, l, esc(l), "data-l")).join("")}
+        </div>`;
+      }
+      cont.innerHTML = html;
+
+      cont.querySelectorAll("[data-s]").forEach((b) => {
+        b.onclick = () => { sentidoSel = b.dataset.s || null; pintarFiltros(); cargar(); };
+      });
+      cont.querySelectorAll("[data-l]").forEach((b) => {
+        // Al cambiar de línea cambian los extremos, así que el sentido se reinicia.
+        b.onclick = () => { filtro = b.dataset.l || null; sentidoSel = null; pintarFiltros(); cargar(); };
       });
     }
 
-    function pintarLineas(estado) {
-      const cont = document.getElementById("lineas");
-      cont.innerHTML = estado.lineas.map((l) => {
-        const inc = l.estado === "incidencia";
-        const live = liveCodes.has(l.linea);
-        const tag = live ? "a" : "div";
-        const href = live ? ` href="/linea.html?l=${encodeURIComponent(l.linea)}"` : "";
-        const nota = inc && l.incidencias?.[0]?.texto
-          ? `<div class="linecard__note" title="${esc(l.incidencias[0].texto)}">${esc(l.incidencias[0].texto)}</div>`
-          : "";
-        return `<${tag} class="linecard ${inc ? "is-inc" : ""}"${href}>
-          ${bullet(l.linea, "md")}
-          <div class="linecard__body">
-            <div class="linecard__status ${inc ? "inc" : "ok"}">
-              <span class="dot ${inc ? "dot--inc" : "dot--ok"}"></span>
-              ${inc ? "Con incidencias" : "Circula con normalidad"}
-            </div>
-            ${nota}
-          </div>
-          ${live ? `<span class="linecard__go" aria-hidden="true">→</span>` : ""}
-        </${tag}>`;
-      }).join("");
+    /* --------------------------------------------------------------- salidas */
+
+    // Minutos que faltan AHORA: los del servidor menos lo que ha pasado desde
+    // que llegó la respuesta. Es aritmética relativa, así que no le afecta que
+    // el reloj del navegador esté en otra zona horaria que la API.
+    const minutosAhora = (enMin) =>
+      enMin == null ? null : Math.round(enMin - (Date.now() - baseMs) / 60000);
+
+    function filaHTML(s) {
+      const m = minutosAhora(s.enMin);
+      const min = m == null ? "--"
+        : m <= 0 ? `<span style="font-size:.72em">llegando</span>`
+        : m < 60 ? `${m}<small>min</small>`
+        : `${Math.floor(m / 60)}<small>h</small> ${m % 60}<small>min</small>`;
+
+      const retraso = s.cancelado ? `<span class="dep__cancel">Cancelado</span>`
+        : s.delay > 0 ? `<span class="dep__delay">+${s.delay} min</span>`
+        : s.delay === 0 && s.estado === "circulando" ? `<span class="dep__ontime">En hora</span>`
+        : "";
+
+      // Si lleva retraso, se tacha la hora de horario y manda la real.
+      const horas = s.delay > 0
+        ? `<span class="dep__was">${esc(s.programada)}</span><b>${esc(s.hora)}</b>`
+        : `<b>${esc(s.hora)}</b>`;
+
+      const plat = s.anden
+        ? `<div class="dep__plat"><span>Vía</span><b>${esc(s.anden)}</b></div>`
+        : `<div class="dep__plat"></div>`;
+
+      // Dónde está el tren ahora, dicho en llano. `proxima` es la siguiente parada
+      // en la que para, así que "llegando a" es literal, no una interpretación.
+      const donde = s.estado === "programado"
+        ? `<span class="tag-prog">Todavía en ${esc(s.origen)}</span>`
+        : !s.proxima ? ""
+        // Si su próxima parada es esta, es el que está entrando: dilo así.
+        : s.proxima === datos?.parada?.name ? `<b>Llegando a esta parada</b>`
+        : `Llegando a ${esc(s.proxima)}`;
+
+      const sub = [
+        donde,
+        `<span class="dep__num">tren ${esc(s.tren)}</span>`,
+        s.accesible ? "♿" : "",
+      ].filter(Boolean).join(`<span class="sep">·</span>`);
+
+      return `<article class="dep ${m != null && m <= 3 && s.estado === "circulando" ? "is-soon" : ""}
+                   ${s.estado === "programado" ? "is-prog" : ""} ${s.cancelado ? "is-cancel" : ""}">
+        ${bullet(s.linea, "md")}
+        <div class="dep__body">
+          <div class="dep__lbl">Destino</div>
+          <div class="dep__dest">${esc(s.destino)}</div>
+          <div class="dep__sub">${sub}</div>
+        </div>
+        ${plat}
+        <div class="dep__times">
+          <div class="dep__min">${min}</div>
+          <div class="dep__clock">${retraso}${horas}</div>
+        </div>
+      </article>`;
     }
 
-    function pintarIncidencias(data) {
-      const sec = document.getElementById("sec-inc");
-      const cont = document.getElementById("incidencias");
-      const count = document.getElementById("inc-count");
-      const activas = data.incidencias
-        .filter((i) => i.vigente)
-        .sort((a, b) => (b.inicio || 0) - (a.inicio || 0));
+    function pintarSalidas() {
+      const cont = $("deps");
+      if (!datos) return;
+      $("deps-hint").textContent = datos.ahora ? `hora de la red ${datos.ahora}` : "";
+      $("clock").textContent = datos.ahora ? `· ${datos.ahora}` : "";
 
-      if (!activas.length) {
-        sec.hidden = false;
-        count.hidden = true;
+      const lista = datos.salidas.filter((s) => (minutosAhora(s.enMin) ?? 0) >= -1);
+
+      if (!lista.length) {
         cont.innerHTML = `<div class="empty">
-          <div class="empty__icon">✓</div>
-          <p><b>Sin incidencias activas.</b><br>Toda la red circula con normalidad ahora mismo.</p>
+          <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">🌙</div>
+          <p><b>${sentidoSel || filtro ? "No hay trenes previstos con este filtro." : "Ahora mismo no hay trenes previstos."}</b><br>
+          ${sentidoSel || filtro
+            ? "Prueba a quitar el filtro de sentido o de línea."
+            : "La API oficial solo publica circulación en horario de servicio (aprox. 05:00–00:30)."}</p>
         </div>`;
         return;
       }
 
-      sec.hidden = false;
-      count.hidden = false;
-      count.textContent = `${activas.length} activa${activas.length === 1 ? "" : "s"}`;
+      // Sin filtro de sentido, los trenes van agrupados por dirección: mezclarlos
+      // obliga a saberse el orden de las paradas para saber cuál te sirve.
+      const dirs = [...new Set(lista.map((s) => s.sentido?.hacia).filter(Boolean))];
+      if (sentidoSel || dirs.length < 2) {
+        cont.innerHTML = lista.map(filaHTML).join("");
+        return;
+      }
 
-      cont.innerHTML = activas.map((i) => {
-        const MAX = 8;
-        const bullets = i.lineas.slice(0, MAX).map((l) => bullet(l, "sm")).join("");
-        const extra = i.lineas.length > MAX ? `<span class="incident__more">+${i.lineas.length - MAX}</span>` : "";
-        const desde = i.inicio ? `Activa · empezó ${timeAgo(i.inicio)}` : "Activa";
-        const hasta = i.fin ? ` · hasta ${clockAt(i.fin)}` : "";
-        const alt = i.texto_alt?.[0]
-          ? `<details class="incident__alt"><summary>Versió en català</summary><p>${esc(i.texto_alt[0])}</p></details>`
-          : "";
-        return `<article class="incident">
-          <div class="incident__head">
-            <div class="incident__lines">${bullets}</div>${extra}
-            <span class="incident__time">${desde}${hasta}</span>
-          </div>
-          <p class="incident__text">${esc(i.texto)}</p>
-          ${alt}
-        </article>`;
-      }).join("");
+      const grupos = dirs.map((d) => ({ hacia: d, filas: lista.filter((s) => s.sentido?.hacia === d) }));
+      const sinSentido = lista.filter((s) => !s.sentido);
+      if (sinSentido.length) grupos.push({ hacia: null, filas: sinSentido });
+
+      cont.innerHTML = grupos.map((g) => `
+        <h3 class="dirhead">${g.hacia
+          ? `<span class="dirhead__arrow">→</span> Sentido ${esc(g.hacia)}`
+          : "Otros servicios"}</h3>
+        ${g.filas.map(filaHTML).join("")}`).join("");
     }
 
-    function tickClock() {
-      document.getElementById("clock").textContent =
-        lastUpdate ? `actualizado ${timeAgo(lastUpdate / 1000)}` : new Date().toLocaleTimeString("es-ES");
-    }
-
-    async function refrescar() {
+    async function cargar() {
+      if (!sel) return;
       try {
-        // El catálogo de líneas (para saber cuáles tienen vista en vivo) puede fallar
-        // fuera de horario; se tolera y se sigue solo con el estado.
-        const [estado, inc, lineas] = await Promise.all([
-          getJSON("/api/estado"),
-          getJSON("/api/incidencias"),
-          getJSON("/api/lineas").catch(() => ({ lineas: [] })),
-        ]);
-        liveCodes = new Set(lineas.lineas.map((l) => l.id));
-        pintarBoard(estado, inc.incidencias.filter((x) => x.vigente).length);
-        pintarLineas(estado);
-        pintarIncidencias(inc);
-        lastUpdate = Date.now();
-        tickClock();
+        const p = new URLSearchParams();
+        if (filtro) p.set("linea", filtro);
+        if (sentidoSel) p.set("sentido", sentidoSel);
+        const qs = p.toString();
+        datos = await getJSON(`/api/parada/${encodeURIComponent(sel.id)}/salidas${qs ? "?" + qs : ""}`);
+        baseMs = Date.now();
+        pintarFiltros();
+        pintarSalidas();
         setLive(true);
       } catch (e) {
         setLive(false);
-        const sub = document.getElementById("subhead");
-        if (!lastUpdate) {
-          document.getElementById("headline").textContent = "No se pudo leer el feed";
-          sub.textContent = "Reintentando en unos segundos…";
-          document.getElementById("board").dataset.state = "loading";
+        if (!datos) {
+          $("deps").innerHTML = `<div class="empty">
+            <div class="empty__icon" style="background:var(--alert-bg);color:var(--alert)">!</div>
+            <p><b>No se pudo leer la API de Rodalies.</b><br>Reintentando en unos segundos…</p>
+          </div>`;
         }
       }
     }
 
-    refrescar();
-    setInterval(refrescar, 30_000);
-    setInterval(tickClock, 10_000);
+    /* ----------------------------------------------------------------- inicio */
+
+    async function init() {
+      $("q").addEventListener("input", (e) => {
+        $("clear").hidden = !e.target.value;
+        pintarOpciones(e.target.value);
+      });
+      $("q").addEventListener("focus", (e) => pintarOpciones(e.target.value));
+      $("q").addEventListener("blur", () => setTimeout(cerrarOpciones, 120));
+      $("q").addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown") { e.preventDefault(); mover(1); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); mover(-1); }
+        else if (e.key === "Enter") {
+          const items = [...$("opts").querySelectorAll(".picker__opt")];
+          const li = items[marcado >= 0 ? marcado : 0];
+          if (li) { e.preventDefault(); elegir(li.dataset.id); }
+        } else if (e.key === "Escape") cerrarOpciones();
+      });
+      $("clear").onclick = () => { $("q").value = ""; $("clear").hidden = true; $("q").focus(); pintarOpciones(""); };
+
+      try {
+        paradas = (await getJSON("/api/paradas")).paradas;
+      } catch (e) {
+        setLive(false);
+        return;
+      }
+
+      // Parada: la de la URL, si no la última usada.
+      const url = new URLSearchParams(location.search).get("p");
+      const guardada = localStorage.getItem("parada");
+      const id = url || guardada;
+      if (id && paradas.some((p) => p.id === id)) elegir(id);
+
+      setInterval(cargar, 30_000);
+      setInterval(pintarSalidas, 15_000);  // los minutos siguen bajando entre refrescos
+    }
+
+    init();
   </script>
 </body>
 </html>

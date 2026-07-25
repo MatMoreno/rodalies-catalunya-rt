@@ -4,8 +4,9 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { getIncidencias, getEstadoLineas } from "./rodalies.mjs";
-import { getLines } from "./api.mjs";
+import { getLines, getStations } from "./api.mjs";
 import { getLineaEnVivo } from "./liveLine.mjs";
+import { getSalidasParada } from "./stopBoard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -23,7 +24,12 @@ app.use((_req, res, next) => {
 const wrap = (fn) => (req, res) =>
   fn(req, res).catch((err) => {
     console.error(err);
-    res.status(502).json({ error: "No se pudo leer el feed de Renfe", detalle: String(err.message || err) });
+    // Un 404 nuestro (parada/línea inexistente) no es un fallo del feed.
+    const code = err.status === 404 ? 404 : 502;
+    res.status(code).json({
+      error: code === 404 ? String(err.message) : "No se pudo leer el feed de Renfe",
+      detalle: String(err.message || err),
+    });
   });
 
 // Todas las incidencias de Catalunya (crudas y parseadas).
@@ -56,6 +62,30 @@ app.get("/api/lineas", wrap(async (_req, res) => {
 // Línea con sus paradas + trenes situados entre paradas, en vivo.
 app.get("/api/linea/:id/vivo", wrap(async (req, res) => {
   res.json(await getLineaEnVivo(req.params.id.toUpperCase(), { demo: req.query.demo === "1" }));
+}));
+
+// --- Salidas por PARADA (la vista principal) ---
+
+// Catálogo de estaciones para el buscador. ?q= filtra por nombre.
+app.get("/api/paradas", wrap(async (req, res) => {
+  const q = (req.query.q || "").toString().trim().toLowerCase();
+  let paradas = await getStations();
+  if (q) {
+    // Sin acentos: NFD separa la tilde en marca combinante y \p{M} la quita.
+    const norm = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+    const nq = norm(q);
+    paradas = paradas.filter((s) => norm(s.name).includes(nq));
+  }
+  res.json({ paradas, total: paradas.length });
+}));
+
+// Próximos trenes desde una parada.
+// ?linea=R1 filtra por línea · ?sentido=<extremo> por dirección · ?limite=N recorta.
+app.get("/api/parada/:id/salidas", wrap(async (req, res) => {
+  const limite = Math.min(60, Math.max(1, Number(req.query.limite) || 30));
+  const linea = req.query.linea ? String(req.query.linea).toUpperCase() : null;
+  const sentido = req.query.sentido ? String(req.query.sentido) : null;
+  res.json(await getSalidasParada(req.params.id, { linea, sentido, limite }));
 }));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
