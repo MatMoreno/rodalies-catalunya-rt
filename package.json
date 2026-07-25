@@ -1,0 +1,14 @@
+{
+  "name": "rodalies-rt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Estado en tiempo real de Rodalies de Catalunya (incidencias por línea) a partir del GTFS-Realtime de Renfe.",
+  "scripts": {
+    "start": "node src/server.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "gtfs-realtime-bindings": "^1.1.1"
+  }
+}

@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#eef2f6" />
+  <title>Rodalies · Trenes en vivo por línea</title>
+  <meta name="description" content="Posición en tiempo real de cada tren de Rodalies de Catalunya sobre el diagrama de su línea." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* Geometría del diagrama (los nombres de variable los lee el JS al posicionar). */
+    :root {
+      --rowH: 48px; --nameW: 230px; --railW: 40px; --timeW: 96px;
+      --lc: #5a6572;          /* color de la línea activa */
+      --rail: #d7dfe7;        /* carril (tinte claro del color de línea) */
+      --rail-node: #b7c3cd;   /* nodo de parada intermedia */
+    }
+
+    /* Selector de líneas */
+    .linesel {
+      display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 14px;
+      -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+    }
+    .linesel button {
+      flex: 0 0 auto; cursor: pointer; border: none;
+      font-family: var(--font-display); font-weight: 800; font-size: 15px;
+      min-width: 44px; height: 36px; padding: 0 11px; border-radius: 10px;
+      box-shadow: inset 0 0 0 1px rgba(16, 32, 46, .10);
+      transition: transform .12s, box-shadow .12s;
+    }
+    .linesel button:hover { transform: translateY(-2px); }
+    .linesel button.active {
+      transform: translateY(-2px);
+      box-shadow: 0 0 0 2px var(--wash), 0 0 0 4px var(--bc), 0 6px 14px rgba(16, 32, 46, .18);
+    }
+
+    /* Cabecera de la línea seleccionada */
+    .linehead {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 16px 28px; flex-wrap: wrap;
+      background: var(--paper); border: 1px solid var(--hair); border-radius: var(--r-card);
+      padding: 16px 18px; box-shadow: var(--sh-1); margin-bottom: 16px;
+      border-left: 4px solid var(--lc);
+    }
+    .linehead__main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .linehead__route {
+      font-family: var(--font-display); font-weight: 800;
+      font-size: clamp(1.15rem, 3.2vw, 1.55rem); line-height: 1.08; letter-spacing: -.01em;
+    }
+    .linehead__route .arrow { color: var(--ink-3); margin: 0 7px; font-weight: 600; }
+    .linehead__meta { font-size: 13px; color: var(--ink-2); margin-top: 5px; font-family: var(--font-mono); }
+    .linehead__meta b { color: var(--ink); }
+    .linehead__legend { display: flex; gap: 12px 18px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--ink-2); }
+    .dirkey { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; white-space: nowrap; }
+    .dirkey--dn { color: #1f66d6; } .dirkey--up { color: #d9700f; }
+    .linehead__legend .hint { color: var(--ink-3); max-width: 34ch; }
+    .linehead__legend .hint s { color: var(--ink-3); }
+    .badge-demo {
+      font-family: var(--font-display); font-weight: 800; font-size: 10px; letter-spacing: .08em;
+      color: var(--delay-ink); background: var(--delay-bg); padding: 2px 7px; border-radius: 5px; margin-left: 6px;
+    }
+
+    /* Aviso fuera de horario */
+    .aviso {
+      display: flex; gap: 14px; align-items: flex-start;
+      background: var(--paper); border: 1px solid var(--hair); border-radius: var(--r-card);
+      padding: 18px; margin: 4px 0 16px; box-shadow: var(--sh-1);
+    }
+    .aviso__icon {
+      width: 42px; height: 42px; flex: 0 0 auto; border-radius: 50%;
+      display: grid; place-items: center; background: var(--wash-2); font-size: 20px;
+    }
+    .aviso p { margin: 0; color: var(--ink-2); line-height: 1.5; }
+    .aviso b { color: var(--ink); }
+    .aviso a { color: var(--focus); font-weight: 600; text-decoration: none; }
+    .aviso a:hover { text-decoration: underline; }
+
+    /* Diagrama */
+    .diag-scroll { overflow-x: auto; padding: 24px 0 10px; -webkit-overflow-scrolling: touch; }
+    .diagrama { position: relative; }
+
+    .fila { display: flex; height: var(--rowH); align-items: center; }
+    .fila:nth-child(even) { background: rgba(16, 32, 46, .028); }
+    .fila .nombre {
+      width: var(--nameW); text-align: right; padding-right: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      font-size: 14px; font-weight: 600; color: var(--ink);
+    }
+    .fila .nombre small { color: var(--ink-3); font-weight: 500; }
+    .fila.origen .nombre, .fila.destino .nombre { font-weight: 800; font-family: var(--font-display); }
+
+    /* Horarios pegados a cada parada: ▼ destino (azul) · ▲ origen (naranja),
+       prevista tachada arriba y real debajo. */
+    .fila .horas {
+      width: var(--timeW); flex: 0 0 var(--timeW); display: flex; gap: 7px;
+      justify-content: flex-end; align-items: center; padding-right: 10px;
+      font-size: 11px; line-height: 1.08; font-variant-numeric: tabular-nums; font-family: var(--font-mono);
+    }
+    .fila .horas .col { min-width: 34px; text-align: right; }
+    .fila .horas .old { display: block; font-size: 9px; color: var(--ink-3); text-decoration: line-through; opacity: .85; }
+    .fila .horas .new, .fila .horas .single { display: block; font-weight: 600; }
+    .fila .horas .col.dn .new, .fila .horas .col.dn .single { color: #1f66d6; }
+    .fila .horas .col.up .new, .fila .horas .col.up .single { color: #d9700f; }
+
+    .fila .railcol { width: var(--railW); position: relative; height: 100%; flex: 0 0 var(--railW); }
+    .fila .railcol::before {
+      content: ""; position: absolute; left: 50%; margin-left: -2px; top: 0; bottom: 0;
+      width: 4px; background: var(--rail); border-radius: 2px;
+    }
+    .fila:first-child .railcol::before { top: 50%; }
+    .fila:last-child .railcol::before { bottom: 50%; }
+    .nodo {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 12px; height: 12px; border-radius: 50%; background: var(--rail-node);
+      border: 3px solid var(--paper); z-index: 2; box-shadow: 0 0 0 1px var(--rail);
+    }
+    .fila.origen .nodo, .fila.destino .nodo {
+      background: var(--lc); width: 15px; height: 15px; box-shadow: 0 0 0 1px var(--lc);
+    }
+
+    /* Estela del tren + icono en la cabeza */
+    .tstring { position: absolute; width: 5px; border-radius: 3px; z-index: 4; opacity: .9; }
+    .train-icon {
+      position: absolute; transform: translate(-50%, -50%);
+      width: 28px; height: 32px; border-radius: 9px; padding: 2px;
+      background: var(--dc); border: 2px solid var(--paper); cursor: pointer;
+      display: grid; place-items: center; box-shadow: 0 3px 10px rgba(16, 32, 46, .28);
+      z-index: 7; transition: transform .12s;
+    }
+    .train-icon svg { width: 100%; height: 100%; pointer-events: none; display: block; }
+    .train-icon.dn svg { transform: rotate(180deg); }
+    .train-icon:hover, .train-icon.sel { transform: translate(-50%, -50%) scale(1.15); z-index: 9; }
+    .train-icon.sel { box-shadow: 0 0 0 3px var(--dc), 0 3px 10px rgba(16, 32, 46, .35); }
+
+    .plot-label { position: absolute; top: -18px; font-size: 16px; font-weight: 900; line-height: 1; white-space: nowrap; transform: translateX(-50%); }
+
+    /* Tarjeta de detalle */
+    .train-pop {
+      position: absolute; transform: translateY(-50%); background: var(--paper);
+      border: 1px solid var(--hair); border-radius: 12px; padding: 11px 13px; font-size: 12px;
+      z-index: 12; min-width: 220px; box-shadow: var(--sh-2);
+    }
+    .train-pop .top { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+    .train-pop .b { color: #fff; font-weight: 800; border-radius: 6px; padding: 2px 7px; font-size: 12px; font-family: var(--font-display); }
+    .train-pop .num { color: var(--ink-3); font-weight: 700; font-family: var(--font-mono); }
+    .train-pop .dir { margin-left: auto; font-size: 11px; font-weight: 700; }
+    .train-pop .sit { font-weight: 700; margin-bottom: 3px; color: var(--ink); font-size: 13px; }
+    .train-pop .prox { color: var(--ink-2); font-size: 12px; }
+    .train-pop .prox .arr { color: var(--ink); font-weight: 700; font-family: var(--font-mono); }
+
+    .chip { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 20px; font-weight: 700; font-size: 11px; }
+    .chip.bad { background: var(--alert-bg); color: var(--alert-ink); }
+    .chip.delay { background: var(--delay-bg); color: var(--delay-ink); }
+    .chip.ok { background: var(--ok-bg); color: var(--ok-ink); }
+
+    @media (max-width: 640px) {
+      :root { --nameW: 148px; --timeW: 82px; --railW: 34px; }
+      .fila .nombre { font-size: 13px; }
+      .fila .horas { font-size: 10px; gap: 5px; }
+      .fila .horas .col { min-width: 30px; }
+      .linehead { align-items: flex-start; }
+      .linehead__legend .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Rodalies Catalunya · inicio">
+      <span class="brand__mark">R</span>
+      <span class="brand__txt"><b>Rodalies</b><span>Catalunya</span></span>
+    </a>
+    <nav class="topbar__nav">
+      <a href="/" class="navlink">Estado</a>
+      <a href="/linea.html" class="navlink is-active">Trenes en vivo</a>
+    </nav>
+    <div class="topbar__meta">
+      <span class="live" id="live"><span class="live__dot"></span><span>En vivo</span></span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="linesel" id="selector" role="tablist" aria-label="Líneas de Rodalies"></div>
+    <section class="linehead" id="linehead">
+      <div class="skeleton" style="height:52px;width:100%"></div>
+    </section>
+    <div id="msg"></div>
+    <div class="diag-scroll">
+      <div class="diagrama" id="diagrama"></div>
+    </div>
+  </main>
+
+  <script src="/shared.js"></script>
+  <script>
+    const { color, esc, textOn, tint } = window.RR;
+    const j = window.RR.getJSON;
+
+    const params = new URLSearchParams(location.search);
+    const demo = params.get("demo") === "1";
+    let lineaActual = (params.get("l") || "R1").toUpperCase();
+    const rowH = 48;
+    let cerrarPopActual = () => {};
+    // Tren cuyo horario se muestra en las columnas, y si su tarjeta está abierta.
+    let selKey = null, popAbierto = false;
+    const keyOf = (t) => t.tren + "|" + t.direccion;
+    document.addEventListener("click", () => cerrarPopActual());
+
+    function setLive(ok) {
+      const el = document.getElementById("live");
+      el.classList.toggle("is-error", !ok);
+      el.querySelector("span:last-child").textContent = ok ? "En vivo" : "Sin conexión";
+    }
+
+    async function cargarSelector() {
+      const { lineas } = await j("/api/lineas");
+      const cont = document.getElementById("selector");
+      cont.innerHTML = lineas.map((l) => {
+        const c = color(l.id);
+        return `<button data-l="${esc(l.id)}" role="tab" title="${esc(l.name || l.id)}"
+          style="background:${c};color:${textOn(c)};--bc:${c}">${esc(l.id)}</button>`;
+      }).join("");
+      cont.querySelectorAll("button").forEach((b) => {
+        b.onclick = () => {
+          lineaActual = b.dataset.l;
+          marcarActivo();
+          b.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+          refrescar();
+        };
+      });
+      marcarActivo();
+    }
+    function marcarActivo() {
+      document.querySelectorAll("#selector button").forEach((b) => {
+        const on = b.dataset.l === lineaActual;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+    }
+
+    // Colores por SENTIDO (para distinguir un lado del otro).
+    const DIRCOL = { dest: "#2f80ff", orig: "#ff8a34" };   // ▼ azul · ▲ naranja
+    const dcolOf = (dir) => (dir > 0 ? DIRCOL.dest : DIRCOL.orig);
+    // Frontal de tren Renfe (Civia) como icono.
+    const RENFE_SVG = '<svg viewBox="0 0 24 26" aria-hidden="true">'
+      + '<rect x="3" y="1.5" width="18" height="23" rx="6" fill="#fbfbfb" stroke="#aeb6bf" stroke-width=".7"/>'
+      + '<rect x="5.6" y="3.6" width="12.8" height="8" rx="2.4" fill="#232830"/>'
+      + '<circle cx="7.6" cy="14.7" r="1.5" fill="#3a4048"/><circle cx="16.4" cy="14.7" r="1.5" fill="#3a4048"/>'
+      + '<rect x="3.6" y="18" width="16.8" height="2.2" fill="#7a1f70"/>'
+      + '<rect x="3.6" y="20.2" width="16.8" height="1.4" fill="#c2185b"/></svg>';
+    const yDe = (li) => li * rowH + rowH / 2;
+
+    function pintar(data) {
+      const { paradas, trenes } = data;
+      const diag = document.getElementById("diagrama");
+      diag.innerHTML = paradas.map((p, i) => {
+        const cls = i === 0 ? "origen" : (i === paradas.length - 1 ? "destino" : "");
+        return `<div class="fila ${cls}">
+          <div class="nombre">${esc(p.name)} ${p.accessible ? '<small>♿</small>' : ''}</div>
+          <div class="horas" data-li="${i}"></div>
+          <div class="railcol"><span class="nodo"></span></div>
+        </div>`;
+      }).join("");
+
+      // Posición X del raíl a partir de las variables CSS (robusto al colapso de ancho).
+      const cs = getComputedStyle(document.documentElement);
+      const nameW = parseFloat(cs.getPropertyValue("--nameW")) || 250;
+      const railW = parseFloat(cs.getPropertyValue("--railW")) || 40;
+      const timeW = parseFloat(cs.getPropertyValue("--timeW")) || 0;
+      const railX = nameW + timeW + railW / 2;
+      const plotStartX = railX + 42;
+      const colW = 34;
+
+      const horasCells = [...diag.querySelectorAll(".horas")];
+      const regByKey = {};
+
+      // Tarjeta única de detalle.
+      const pop = document.createElement("div");
+      pop.className = "train-pop";
+      pop.style.display = "none";
+      diag.appendChild(pop);
+      let selIcon = null;
+      pop.addEventListener("click", (e) => e.stopPropagation());
+      const cerrarPop = () => { pop.style.display = "none"; popAbierto = false; };
+      cerrarPopActual = cerrarPop;
+
+      // Horarios SIEMPRE visibles: en cada parada, el próximo tren de cada sentido.
+      function pintarColumnas() {
+        const bajanN = trenes.filter((t) => t.direccion > 0).sort((a, b) => a.proxima.li - b.proxima.li);
+        const subenN = trenes.filter((t) => t.direccion <= 0).sort((a, b) => b.proxima.li - a.proxima.li);
+        const nextBy = (arr) => { const m = {}; for (const t of arr) for (const h of (t.horario || [])) m[h.li] = h; return m; };
+        const dn = nextBy(bajanN), up = nextBy(subenN);
+        const inner = (h) => {
+          if (!h) return "";
+          return (h.prog && h.real && h.prog !== h.real)
+            ? `<span class="old">${esc(h.prog)}</span><span class="new">${esc(h.real)}</span>`
+            : `<span class="single">${esc(h.prog || h.real || "")}</span>`;
+        };
+        horasCells.forEach((cell, li) => {
+          if (!cell) return;
+          cell.innerHTML = `<div class="col dn">${inner(dn[li])}</div><div class="col up">${inner(up[li])}</div>`;
+        });
+      }
+      function seleccionar(reg, abrir) {
+        selIcon?.classList.remove("sel");
+        selIcon = reg.icon; reg.icon.classList.add("sel");
+        selKey = keyOf(reg.t);
+        if (abrir) { reg.abrir(); popAbierto = true; }
+        else { pop.style.display = "none"; popAbierto = false; }
+      }
+
+      // Dos grupos por sentido: hacia destino (▼) y hacia origen (▲).
+      const bajan = trenes.filter((t) => t.direccion > 0).sort((a, b) => a.proxima.li - b.proxima.li);
+      const suben = trenes.filter((t) => t.direccion <= 0).sort((a, b) => a.proxima.li - b.proxima.li);
+
+      let slot = 0;
+      const colocar = (arr) => arr.forEach((t) => dibujarTren(t, plotStartX + (slot++) * colW));
+      const etiqueta = (x, txt) => {
+        if (x == null) return;
+        const l = document.createElement("div");
+        l.className = "plot-label"; l.style.left = x + "px"; l.innerHTML = txt;
+        diag.appendChild(l);
+      };
+
+      const xIni = plotStartX;
+      colocar(bajan);
+      if (bajan.length && suben.length) slot += 1; // hueco entre grupos
+      const xSubenIni = plotStartX + slot * colW;
+      colocar(suben);
+      const xFin = plotStartX + slot * colW;
+
+      if (bajan.length) etiqueta(xIni + (bajan.length - 1) * colW / 2, `<span style="color:${DIRCOL.dest}">▼</span>`);
+      if (suben.length) etiqueta(xSubenIni + (suben.length - 1) * colW / 2, `<span style="color:${DIRCOL.orig}">▲</span>`);
+
+      const anchoNecesario = xFin + 40;
+      diag.style.width = Math.max(diag.parentElement.clientWidth, anchoNecesario) + "px";
+
+      function dibujarTren(t, x) {
+        const dc = dcolOf(t.direccion);          // color por SENTIDO
+        const cLin = color(t.linea);
+        const nParadas = paradas.length;
+        const headY = yDe(t.anterior.li + t.fraccion * (t.proxima.li - t.anterior.li));
+        const tailLi = t.direccion > 0 ? 0 : nParadas - 1;
+        const tailY = yDe(tailLi);
+
+        const s = document.createElement("div");
+        s.className = "tstring";
+        s.style.left = x + "px";
+        s.style.top = Math.min(tailY, headY) + "px";
+        s.style.height = Math.max(3, Math.abs(headY - tailY)) + "px";
+        s.style.background = `linear-gradient(${t.direccion > 0 ? "to bottom" : "to top"}, ${dc}22, ${dc})`;
+        diag.appendChild(s);
+
+        // Icono Renfe en la cabeza, coloreado por sentido y girado hacia su destino.
+        const icon = document.createElement("div");
+        icon.className = "train-icon" + (t.direccion > 0 ? " dn" : "");
+        icon.style.left = x + "px";
+        icon.style.top = headY + "px";
+        icon.style.setProperty("--dc", dc);
+        icon.title = `${t.linea} #${t.tren} → ${t.proxima.name}`;
+        icon.innerHTML = RENFE_SVG;
+
+        const enParada = t.anterior.name === t.proxima.name;
+        const sit = enParada ? `En ${esc(t.proxima.name)}`
+          : `Entre ${esc(t.anterior.name)} y ${esc(t.proxima.name)}`;
+        const dChip = t.cancelado ? '<span class="chip bad">CANCELADO</span>'
+          : t.delay == null ? ""
+          : t.delay > 0 ? `<span class="chip delay">+${t.delay} min de retraso</span>`
+          : t.delay < 0 ? `<span class="chip ok">${Math.abs(t.delay)} min adelantado</span>`
+          : `<span class="chip ok">En hora</span>`;
+        const flecha = t.direccion > 0 ? "▼" : "▲";
+        const cd = t.proxima.enMin == null ? ""
+          : t.proxima.enMin <= 0 ? " · <b>llegando</b>"
+          : ` · <b>en ${t.proxima.enMin} min</b>`;
+        const progNx = t.proxima.programada, realNx = t.proxima.real || t.proxima.llegada;
+        const horaTxt = (progNx && realNx && progNx !== realNx)
+          ? `<s style="color:var(--ink-3)">${esc(progNx)}</s> <span class="arr">${esc(realNx)}</span>`
+          : `<span class="arr">${esc(realNx || progNx || "—")}</span>`;
+
+        const abrir = () => {
+          pop.style.setProperty("--tc", dc);
+          pop.innerHTML = `
+            <div class="top">
+              <span class="b" style="background:${cLin};color:${textOn(cLin)}">${esc(t.linea)}</span>
+              <span class="num">#${esc(t.tren)}</span>
+              <span class="dir" style="color:${dc}">${flecha} ${esc(t.destino || "")}</span>
+            </div>
+            <div class="sit">${sit}</div>
+            <div class="prox">${enParada ? "Sale" : `Próxima: ${esc(t.proxima.name)}`} · ${horaTxt}${cd}</div>
+            ${dChip}`;
+          pop.style.display = "block";
+          const popW = pop.offsetWidth;
+          const diagW = diag.clientWidth;
+          let left = x + 18;
+          if (left + popW > diagW - 4) left = x - popW - 18;
+          if (left < 4) left = 4;
+          pop.style.left = left + "px";
+          pop.style.top = headY + "px";
+        };
+
+        const reg = { icon, abrir, t };
+        regByKey[keyOf(t)] = reg;
+        icon.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (selIcon === icon) {
+            if (popAbierto) cerrarPop(); else seleccionar(reg, true);
+          } else {
+            seleccionar(reg, true);
+          }
+        });
+        diag.appendChild(icon);
+      }
+
+      pintarColumnas();
+      if (selKey && popAbierto) {
+        const reg = regByKey[selKey];
+        if (reg) seleccionar(reg, true); else { popAbierto = false; selKey = null; }
+      }
+    }
+
+    function pintarCabecera(data, n) {
+      const lc = color(data.linea.id);
+      const root = document.documentElement.style;
+      root.setProperty("--lc", lc);
+      root.setProperty("--rail", tint(lc, 0.8));
+      root.setProperty("--rail-node", tint(lc, 0.55));
+
+      const head = document.getElementById("linehead");
+      const hora = new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+      const trenesTxt = n
+        ? `<b style="color:var(--ok)">${n}</b> tren${n === 1 ? "" : "es"} circulando`
+        : `sin circulación ahora`;
+      const demoTag = demo ? `<span class="badge-demo">DEMO</span>` : "";
+      head.innerHTML = `
+        <div class="linehead__main">
+          <span class="bullet bullet--lg" style="background:${lc};color:${textOn(lc)}">${esc(data.linea.id)}</span>
+          <div>
+            <div class="linehead__route">${esc(data.linea.origin || "")}<span class="arrow">↔</span>${esc(data.linea.destination || "")}</div>
+            <div class="linehead__meta">${trenesTxt} · actualizado ${hora}${demoTag}</div>
+          </div>
+        </div>
+        <div class="linehead__legend">
+          <span class="dirkey dirkey--dn">▼ hacia ${esc(data.linea.destination || "")}</span>
+          <span class="dirkey dirkey--up">▲ hacia ${esc(data.linea.origin || "")}</span>
+          ${n ? `<span class="hint">horarios por parada: <s>prevista</s> / real · pulsa un tren para su detalle</span>` : ""}
+        </div>`;
+    }
+
+    async function refrescar() {
+      const msg = document.getElementById("msg");
+      try {
+        const data = await j(`/api/linea/${lineaActual}/vivo${demo ? "?demo=1" : ""}`);
+        pintar(data);
+        pintarCabecera(data, data.trenes.length);
+        msg.innerHTML = (!data.trenes.length && !demo)
+          ? `<div class="aviso">
+               <div class="aviso__icon">🕒</div>
+               <p><b>No hay trenes en circulación en esta línea ahora mismo.</b><br>
+               El servicio funciona aproximadamente de 05:00 a 00:30.
+               Puedes <a href="?l=${esc(lineaActual)}&demo=1">ver una simulación</a> de cómo se ve la vista con trenes.</p>
+             </div>` : "";
+        setLive(true);
+      } catch (e) {
+        setLive(false);
+        document.getElementById("linehead").innerHTML =
+          `<div class="aviso"><div class="aviso__icon">⚠️</div>
+           <p><b>No se pudo cargar la línea ${esc(lineaActual)}.</b><br>
+           ${esc(String(e.message)) === "404" ? "Esta línea no tiene vista en vivo disponible." : "Reintentando en unos segundos…"}</p></div>`;
+      }
+    }
+
+    (async () => {
+      try { await cargarSelector(); } catch (_) { setLive(false); }
+      await refrescar();
+      setInterval(refrescar, 20_000);
+    })();
+  </script>
+</body>
+</html>
