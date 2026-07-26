@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#eef2f6" />
+  <title>Bus Catalunya · Próximos buses desde tu parada</title>
+  <meta name="description" content="A qué hora pasa tu bus por tu parada: interurbanos de la Generalitat y urbanos de Barcelona en tiempo real." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Rodalies Catalunya · inicio">
+      <span class="brand__mark">R</span>
+      <span class="brand__txt"><b>Rodalies</b><span>Catalunya</span></span>
+    </a>
+    <nav class="topbar__nav">
+      <a href="/" class="navlink">Mi parada</a>
+      <a href="/estado.html" class="navlink">Estado</a>
+      <a href="/linea.html" class="navlink">Trenes en vivo</a>
+      <a href="/bus.html" class="navlink is-active">Buses</a>
+    </nav>
+    <div class="topbar__meta">
+      <span class="live" id="live"><span class="live__dot"></span><span>En vivo</span></span>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="rise">
+      <div class="picker" id="picker">
+        <div class="picker__field">
+          <span class="picker__icon" aria-hidden="true">⌕</span>
+          <input class="picker__input" id="q" type="text" role="combobox"
+                 aria-expanded="false" aria-controls="opts" aria-autocomplete="list"
+                 placeholder="Busca tu parada de bus…" autocomplete="off" />
+          <button class="picker__clear" id="clear" type="button" aria-label="Borrar" hidden>×</button>
+        </div>
+        <ul class="picker__list" id="opts" role="listbox" aria-label="Paradas de bus" hidden></ul>
+      </div>
+
+      <div class="feedwarn" id="feedwarn" hidden></div>
+
+      <div class="stophero" id="hero" hidden>
+        <h1 class="stophero__name" id="stop-name"></h1>
+        <p class="stophero__meta">
+          <span id="stop-detalle"></span>
+          <span class="clock" id="clock"></span>
+          <span id="stop-fuente"></span>
+        </p>
+      </div>
+
+      <div class="busresumen" id="resumen" hidden></div>
+      <div class="filters" id="filters"></div>
+    </section>
+
+    <section class="section" id="sec-deps" style="margin-top:22px">
+      <div class="section__head">
+        <h2 id="deps-title">Próximos buses</h2>
+        <span class="section__hint" id="deps-hint"></span>
+      </div>
+      <div class="deps" id="deps">
+        <div class="empty">
+          <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">⌕</div>
+          <p><b>Elige tu parada o tu línea.</b><br>Te digo a qué hora pasa cada bus y cuántos minutos faltan.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vista de LÍNEA: el recorrido, sentido por sentido, con las horas del
+         próximo paso. Se llega escribiendo "N82" en el mismo buscador. -->
+    <section class="section" id="sec-linea" hidden style="margin-top:22px">
+      <div class="section__head">
+        <h2>Recorrido</h2>
+        <span class="section__hint" id="linea-hint"></span>
+      </div>
+      <div id="recorridos"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Horarios de los <a href="https://analisi.transparenciacatalunya.cat/Transport/Transport-de-viatgers-per-carretera-GTFS/bca2-b4i3" rel="noreferrer">buses interurbanos de la Generalitat</a>
+    (horario publicado, sin retrasos) y buses urbanos de Barcelona en tiempo real vía <a href="https://developer.tmb.cat" rel="noreferrer">iBus de TMB</a>.
+    Las filas con el punto verde son <b>en vivo</b>; el resto son de <b>horario</b>.
+    Para los trenes, mira <a href="/">tu parada de Rodalies</a>.
+  </footer>
+
+  <script src="/shared.js"></script>
+  <script>
+    const { esc, bullet, bulletBus, getJSON } = window.RR;
+
+    let vista = "parada";    // "parada" (tablero) | "linea" (recorrido)
+    let sel = null;          // parada elegida (ficha)
+    let linea = null;        // línea elegida, con sus recorridos
+    let filtro = null;       // línea filtrada
+    let destinoSel = null;   // destino filtrado
+    let ventana = 120;       // minutos de horario que se piden
+    let datos = null;        // última respuesta
+    let baseMs = 0;          // reloj del cliente al recibirla (para descontar minutos)
+    let marcado = -1;        // opción resaltada en el buscador
+    let ultimaCarga = 0;
+    let tecleo = null;       // temporizador del debounce
+
+    const $ = (id) => document.getElementById(id);
+
+    // Palanca de depuración: ?fecha=20260801&hora=00:10 fuerza el momento, que
+    // es la única forma práctica de mirar el cambio de día sin trasnochar. Se
+    // leen UNA vez y se arrastran al reescribir la URL: si se leyeran en cada
+    // carga, el primer replaceState las borraría y el tablero volvería a la
+    // hora real sin avisar.
+    const depuracion = (() => {
+      const u = new URLSearchParams(location.search);
+      const d = {};
+      for (const k of ["fecha", "hora"]) if (u.get(k)) d[k] = u.get(k);
+      return d;
+    })();
+
+    function setLive(ok) {
+      const el = $("live");
+      el.classList.toggle("is-error", !ok);
+      el.querySelector("span:last-child").textContent = ok ? "En vivo" : "Sin conexión";
+    }
+
+    /* ---------------------------------------------------------------- buscador
+
+       Aquí está la diferencia de fondo con el buscador de trenes: son 9.010
+       paradas (más de 1 MB de JSON), así que el catálogo NO se descarga; se
+       pregunta al servidor. Con debounce, mínimo dos letras y memoria de las
+       consultas ya hechas, para que borrar letras sea instantáneo. */
+
+    const hechas = new Map();   // texto -> { lineas, paradas }
+
+    async function buscar(texto) {
+      const t = texto.trim();
+      if (hechas.has(t)) return hechas.get(t);
+      // Un solo viaje al servidor devuelve las dos cosas: no hay que decidir de
+      // antemano si lo que se escribe es una línea o una parada.
+      const j = await getJSON(`/api/bus/buscar?q=${encodeURIComponent(t)}&limite=25`);
+      const r = { lineas: j.lineas || [], paradas: j.paradas || [], coincide: j.coincide };
+      hechas.set(t, r);
+      return r;
+    }
+
+    function filaParada(p) {
+      // Una parada de TMB no publica qué líneas paran en ella (solo se sabe en
+      // vivo): en su sitio va la etiqueta de tiempo real, para que la fila no
+      // quede muda.
+      const marca = p.lineas && p.lineas.length
+        ? p.lineas.slice(0, 4).map((l) => bulletBus(l, "sm")).join("")
+        : p.fuente === "tmb" ? `<span class="picker__vivo">en vivo</span>` : "";
+      return `<li class="picker__opt" role="option" aria-selected="false" data-id="${esc(p.id)}">
+        <b>${esc(p.name)}</b>
+        <span class="picker__lines">${marca}</span>
+      </li>`;
+    }
+
+    function filaLinea(l) {
+      return `<li class="picker__opt" role="option" aria-selected="false" data-linea="${esc(l.linea)}">
+        ${bulletBus(l.linea, "sm", l.color, l.colorTexto)}
+        <b class="picker__rec">${esc(l.recorrido || l.linea)}</b>
+        <span class="picker__lines"><span class="picker__go">recorrido →</span></span>
+      </li>`;
+    }
+
+    function listaHTML({ lineas, paradas, coincide }, texto) {
+      if (!lineas.length && !paradas.length) {
+        return `<li class="picker__empty">Nada coincide con “${esc(texto)}”.</li>`;
+      }
+      const grupoLineas = lineas.length
+        ? `<li class="picker__grupo">Líneas</li>` + lineas.map(filaLinea).join("") : "";
+      const grupoParadas = paradas.length
+        ? `<li class="picker__grupo">Paradas</li>` + paradas.map(filaParada).join("") : "";
+      // Si lo escrito se parece al código de una línea ("n82"), las líneas van
+      // delante. Si parece un nombre de sitio ("meridiana"), delante las paradas.
+      return coincide === "parada" ? grupoParadas + grupoLineas : grupoLineas + grupoParadas;
+    }
+
+    function pintarLista(html) {
+      const ul = $("opts");
+      ul.innerHTML = html;
+      marcado = -1;
+      ul.querySelectorAll(".picker__opt").forEach((li) => {
+        li.onmousedown = (e) => {
+          e.preventDefault();
+          if (li.dataset.linea) elegirLinea(li.dataset.linea);
+          else elegir(li.dataset.id);
+        };
+      });
+      ul.hidden = false;
+      $("q").setAttribute("aria-expanded", "true");
+    }
+
+    async function pintarOpciones(texto) {
+      const t = texto.trim();
+      if (t.length < 2) {
+        pintarLista(`<li class="picker__hint">Escribe al menos 2 letras del nombre de la parada.</li>`);
+        return;
+      }
+      // Si esa consulta ya se hizo, se pinta sin pasar por la red ni por el
+      // debounce: al borrar letras la lista no debe parpadear.
+      if (hechas.has(t)) { pintarLista(listaHTML(hechas.get(t), t)); return; }
+      clearTimeout(tecleo);
+      tecleo = setTimeout(async () => {
+        try {
+          const r = await buscar(t);
+          // Si mientras llegaba la respuesta el texto ha cambiado, no se pinta.
+          if ($("q").value.trim() !== t) return;
+          pintarLista(listaHTML(r, t));
+        } catch (e) {
+          pintarLista(`<li class="picker__empty">No se pudo buscar ahora mismo.</li>`);
+        }
+      }, 180);
+    }
+
+    function cerrarOpciones() {
+      $("opts").hidden = true;
+      $("q").setAttribute("aria-expanded", "false");
+    }
+
+    function mover(paso) {
+      const items = [...$("opts").querySelectorAll(".picker__opt")];
+      if (!items.length) return;
+      if (marcado >= 0) items[marcado].classList.remove("is-on");
+      marcado = (marcado + paso + items.length) % items.length;
+      items[marcado].classList.add("is-on");
+      items[marcado].scrollIntoView({ block: "nearest" });
+    }
+
+    /* -------------------------------------------------------- vista de LÍNEA */
+
+    // Escribir "N82" no puede llevar a un tablero de parada: la pregunta es otra
+    // ("¿por dónde pasa y a qué hora?"). Se enseña el recorrido de cada sentido
+    // con las horas del PRÓXIMO paso, y cada poste lleva a su tablero.
+    async function elegirLinea(codigo) {
+      vista = "linea";
+      sel = null;
+      datos = null;
+      const url = new URLSearchParams({ l: codigo, ...depuracion });
+      history.replaceState(null, "", `?${url}`);
+      $("q").value = "";
+      $("clear").hidden = true;
+      cerrarOpciones();
+      $("q").blur();
+
+      $("sec-deps").hidden = true;
+      $("sec-linea").hidden = false;
+      $("resumen").hidden = true;
+      $("filters").innerHTML = "";
+      $("recorridos").innerHTML = `<div class="skeleton sk-card" style="height:120px"></div>`;
+
+      try {
+        const p = new URLSearchParams(depuracion);
+        const qs = p.toString();
+        linea = await getJSON(`/api/bus/linea/${encodeURIComponent(codigo)}${qs ? "?" + qs : ""}`);
+        baseMs = Date.now();
+        ultimaCarga = Date.now();
+      } catch (e) {
+        linea = null;
+        $("hero").hidden = true;
+        $("recorridos").innerHTML = `<div class="empty">
+          <div class="empty__icon" style="background:var(--alert-bg);color:var(--alert)">!</div>
+          <p><b>No encuentro la línea ${esc(codigo)}.</b><br>
+          Prueba con su código tal como sale en el poste (por ejemplo <b>N82</b> o <b>H12</b>).</p></div>`;
+        setLive(false);
+        return;
+      }
+
+      $("hero").hidden = false;
+      $("stop-name").innerHTML = `${bulletBus(linea.linea, "lg", linea.color, linea.colorTexto)}
+        <span class="lineahero__nom">${esc(linea.recorrido || "")}</span>`;
+      $("stop-detalle").textContent = linea.operador || "";
+      pintarRecorridos();
+      setLive(true);
+    }
+
+    function pintarRecorridos() {
+      if (!linea) return;
+      $("linea-hint").textContent = linea.sin_horario
+        ? "TMB no publica horario: solo el trazado"
+        : linea.ahora ? `hora de la red ${linea.ahora}` : "";
+      $("clock").textContent = linea.ahora ? `· ${linea.ahora}` : "";
+
+      $("recorridos").innerHTML = linea.sentidos.map((s, i) => {
+        const m = minutosAhora(s.salida?.enMin);
+        // Sin horario (TMB) no se dice "sin próximo paso", que sonaría a que no
+        // circula: es que esa red no publica horas por aquí, y eso ya lo dice la
+        // cabecera de la sección una sola vez.
+        const cuando = s.salida
+          ? `<span class="ruta__sale"><b>${esc(s.salida.hora)}</b>${
+              m == null ? "" : m <= 0 ? " · saliendo" : ` · ${m} min`}</span>`
+          : linea.sin_horario ? `<span class="ruta__sin">en vivo en cada poste</span>`
+          : `<span class="ruta__sin">sin próximo paso</span>`;
+        // Los servicios parciales del mismo sentido: es lo que hay que saber
+        // ANTES de subirse, no después.
+        const parciales = (s.otros_finales || []).length
+          ? `<p class="ruta__nota">Algunos servicios acaban antes: ${
+              s.otros_finales.slice(0, 3).map((o) => `${esc(o.hacia)} (${o.n})`).join(" · ")}.</p>`
+          : "";
+        return `<details class="ruta" ${i === 0 ? "open" : ""}>
+          <summary class="ruta__head">
+            <span class="ruta__arrow" aria-hidden="true">→</span>
+            <span class="ruta__hacia">hacia <b>${esc(s.hacia || "?")}</b>
+              ${s.recorrido ? `<span class="ruta__var">${esc(s.recorrido)}</span>` : ""}</span>
+            ${cuando}
+          </summary>
+          ${parciales}
+          <ol class="ruta__paradas">
+            ${s.paradas.map((p) => `<li class="ruta__parada ${p.final ? "is-final" : ""}">
+              <a href="/bus.html?p=${encodeURIComponent(p.id)}">
+                <span class="ruta__hora">${p.hora ? esc(p.hora) : ""}</span>
+                <span class="ruta__nom">${esc(p.name)}</span>
+              </a></li>`).join("")}
+          </ol>
+          <p class="ruta__pie">${s.hoy ? `${s.hoy} ${s.hoy === 1 ? "paso" : "pasos"} hoy por este sentido · ` : ""}toca un poste para ver su tablero</p>
+        </details>`;
+      }).join("") || `<div class="empty"><p>Esta línea no tiene recorridos publicados.</p></div>`;
+    }
+
+    /* ------------------------------------------------------------ selección */
+
+    async function elegir(id) {
+      vista = "parada";
+      linea = null;
+      $("sec-linea").hidden = true;
+      $("sec-deps").hidden = false;
+      filtro = null;
+      destinoSel = null;
+      ventana = 120;
+      // La clave es distinta de la del tren: son dos catálogos, y guardar las
+      // dos por separado permite tener una parada de bus y una estación fijas.
+      localStorage.setItem("paradaBus", id);
+      const url = new URLSearchParams({ p: id, ...depuracion });
+      history.replaceState(null, "", `?${url}`);
+      $("q").value = "";
+      $("clear").hidden = true;
+      cerrarOpciones();
+      $("q").blur();
+
+      datos = null;
+      $("resumen").hidden = true;
+      $("filters").innerHTML = "";
+      $("deps").innerHTML = `<div class="skeleton sk-card" style="height:70px"></div>
+        <div class="skeleton sk-card" style="height:70px"></div>
+        <div class="skeleton sk-card" style="height:70px"></div>`;
+
+      try {
+        sel = await getJSON(`/api/bus/parada/${encodeURIComponent(id)}`);
+      } catch (e) {
+        sel = null;
+        localStorage.removeItem("paradaBus");
+        $("hero").hidden = true;
+        $("deps").innerHTML = `<div class="empty">
+          <div class="empty__icon" style="background:var(--alert-bg);color:var(--alert)">!</div>
+          <p><b>Esa parada no existe.</b><br>Busca otra por su nombre.</p></div>`;
+        return;
+      }
+
+      $("hero").hidden = false;
+      $("stop-name").textContent = sel.name;
+      $("stop-detalle").textContent = sel.detalle || "";
+      cargar();
+    }
+
+    // Línea (siempre que la parada tenga más de una) y, con una línea elegida,
+    // sus destinos: una misma línea hace servicios parciales, igual que el R1 a
+    // Calella / Blanes / Maçanet.
+    function pintarFiltros() {
+      const cont = $("filters");
+      const lineas = datos?.lineas || [];
+      const chip = (activo, val, txt, attr) =>
+        `<button class="chip ${activo ? "is-on" : ""}" ${attr}="${esc(val ?? "")}">${txt}</button>`;
+
+      let html = "";
+      if (lineas.length > 1) {
+        // Están TODAS las líneas de la parada, no solo las que pasan en las
+        // próximas dos horas: las que hoy no pasan se ven apagadas, pero se
+        // pueden elegir, que es la única forma de preguntar cuándo vuelven.
+        const mudo = (l) => l.proxima ? ""
+          : ` chip--mudo" title="Hoy no pasa en las próximas ${Math.round(ventana / 60)} h`;
+        html += `<div class="filtrow">
+          <span class="filtrow__lbl">Línea</span>
+          ${chip(!filtro, null, "Todas", "data-l")}
+          ${lineas.map((l) => `<button class="chip ${filtro === l.linea ? "is-on" : ""}${mudo(l)}" ` +
+            `data-l="${esc(l.linea)}">${esc(l.linea)}</button>`).join("")}
+        </div>`;
+      }
+      const destinos = datos?.destinos || [];
+      if (filtro && destinos.length > 1) {
+        html += `<div class="filtrow">
+          <span class="filtrow__lbl">Hacia</span>
+          ${chip(!destinoSel, null, "Todos", "data-d")}
+          ${destinos.map((d) => chip(destinoSel === d.hacia, d.hacia, esc(d.hacia), "data-d")).join("")}
+        </div>`;
+      }
+      cont.innerHTML = html;
+
+      cont.querySelectorAll("[data-l]").forEach((b) => {
+        // Al cambiar de línea cambian los destinos posibles: se reinicia.
+        b.onclick = () => { filtro = b.dataset.l || null; destinoSel = null; pintarFiltros(); cargar(); };
+      });
+      cont.querySelectorAll("[data-d]").forEach((b) => {
+        b.onclick = () => { destinoSel = b.dataset.d || null; pintarFiltros(); cargar(); };
+      });
+    }
+
+    /* --------------------------------------------------------------- salidas */
+
+    // Minutos que faltan AHORA: los del servidor menos lo que ha pasado desde
+    // que llegó la respuesta. Aritmética relativa, así que no le afecta que el
+    // reloj del navegador esté en otra zona horaria que la API.
+    const minutosAhora = (enMin) =>
+      enMin == null ? null : Math.round(enMin - (Date.now() - baseMs) / 60000);
+
+    const minutosHTML = (m) =>
+      m == null ? "--"
+      : m <= 0 ? `<span style="font-size:.72em">llegando</span>`
+      : m < 60 ? `${m}<small>min</small>`
+      : `${Math.floor(m / 60)}<small>h</small> ${m % 60}<small>min</small>`;
+
+    // Tira de resumen por línea: en una parada de diez líneas es LA vista útil.
+    // Buscas tu bullet y lees un número; al tocarla, se filtra por esa línea.
+    function pintarResumen() {
+      const cont = $("resumen");
+      // Aquí SOLO las que tienen próxima salida: la tira existe para leer un
+      // número. Las demás siguen estando en los chips de filtro.
+      const lineas = (datos?.lineas || []).filter((l) => l.proxima);
+      if (lineas.length < 2) { cont.hidden = true; return; }
+      cont.hidden = false;
+      cont.innerHTML = lineas.map((l) => {
+        const m = minutosAhora(l.proxima?.enMin);
+        return `<button class="busres ${filtro === l.linea ? "is-on" : ""}" data-l="${esc(l.linea)}">
+          ${bulletBus(l.linea, "sm", l.color)}
+          <span class="busres__min ${l.tiempoReal ? "is-vivo" : ""}">${m == null ? "--" : m <= 0 ? "ya" : m + "′"}</span>
+          <span class="busres__dest">${esc(l.proxima?.destino || "")}</span>
+        </button>`;
+      }).join("");
+      cont.querySelectorAll("[data-l]").forEach((b) => {
+        b.onclick = () => {
+          // Volver a tocar la línea ya elegida quita el filtro.
+          filtro = filtro === b.dataset.l ? null : b.dataset.l;
+          destinoSel = null;
+          pintarFiltros(); pintarResumen(); cargar();
+        };
+      });
+    }
+
+    function filaHTML(s) {
+      const m = minutosAhora(s.enMin);
+
+      // Las dos redes se leen distinto A PROPÓSITO: una fila de iBus es un
+      // minuto medido y la otra es un horario publicado. Fingir que son lo
+      // mismo sería el peor de los dos mundos.
+      const sub = s.tiempoReal
+        ? [`<span class="dep__vivo"><span class="live__dot"></span>en vivo</span>`,
+           s.operador ? `<span>${esc(s.operador)}</span>` : ""]
+        : [s.origen ? `<span>Desde ${esc(s.origen)}</span>` : "",
+           s.operador ? `<span>${esc(s.operador)}</span>` : ""];
+
+      const hora = s.hora
+        ? `<b>${esc(s.hora)}</b>${s.tiempoReal ? "" : `<span class="dep__horario">horario</span>`}`
+        : "";
+
+      // Cada fila puede abrir el recorrido de ESE autobús. Las de iBus no: TMB
+      // da minutos, no viajes, así que ahí se ofrece el trazado de la línea.
+      const abre = s.viaje
+        ? `<button class="dep__toggle" data-viaje="${esc(s.viaje)}"
+             aria-expanded="${abierto?.viaje === s.viaje}"
+             aria-label="Ver el recorrido de este bus">⌄</button>`
+        : `<a class="dep__toggle" href="/bus.html?l=${encodeURIComponent(s.linea)}"
+             aria-label="Ver el recorrido de la línea ${esc(s.linea)}">›</a>`;
+
+      return `<article class="dep dep--bus ${m != null && m <= 3 ? "is-soon" : ""} ${s.tiempoReal ? "is-vivo" : ""}
+                   ${abierto?.viaje === s.viaje ? "is-abierta" : ""}">
+        ${bulletBus(s.linea, "md", s.color, s.colorTexto)}
+        <div class="dep__body">
+          <div class="dep__lbl">Destino</div>
+          <div class="dep__dest">${esc(s.destino || s.recorrido || "—")}</div>
+          <div class="dep__sub">${sub.filter(Boolean).join("")}</div>
+        </div>
+        <div class="dep__times">
+          <div class="dep__min">${minutosHTML(m)}</div>
+          <div class="dep__clock">${hora}</div>
+        </div>
+        ${abre}
+      </article>`;
+    }
+
+    /* ------------------------------------------------- recorrido de UN bus */
+
+    let abierto = null;   // { viaje, datos, base } de la fila desplegada
+
+    // Se guarda en una variable y se vuelve a pintar dentro de pintarSalidas, no
+    // se inserta en el DOM a mano: el tablero se repinta cada 15 s para que bajen
+    // los minutos, y si el panel viviera solo en el DOM se cerraría solo.
+    async function alternarViaje(id) {
+      if (abierto?.viaje === id) { abierto = null; pintarSalidas(); return; }
+      abierto = { viaje: id, datos: null, base: Date.now() };
+      pintarSalidas();
+      try {
+        const qs = new URLSearchParams(depuracion).toString();
+        const d = await getJSON(`/api/bus/viaje/${encodeURIComponent(id)}${qs ? "?" + qs : ""}`);
+        if (abierto?.viaje !== id) return;   // se cerró mientras llegaba
+        abierto.datos = d;
+        abierto.base = Date.now();
+      } catch (e) {
+        if (abierto?.viaje === id) abierto.datos = "error";
+      }
+      pintarSalidas();
+    }
+
+    function panelViaje() {
+      if (!abierto) return "";
+      if (abierto.datos === "error") {
+        return `<div class="viaje"><p class="viaje__meta">No se pudo cargar el recorrido de este bus.</p></div>`;
+      }
+      if (!abierto.datos) return `<div class="viaje"><div class="skeleton" style="height:88px"></div></div>`;
+      const v = abierto.datos;
+      // Minutos relativos al instante en que llegó ESTA respuesta, no al del
+      // tablero: son dos peticiones distintas.
+      const min = (enMin) => enMin == null ? null : Math.round(enMin - (Date.now() - abierto.base) / 60000);
+      const aqui = datos?.parada?.id;
+
+      return `<div class="viaje">
+        <p class="viaje__meta">
+          Sale de <b>${esc(v.desde)}</b> a las ${esc(v.paradas[0].hora)}
+          y termina en <b>${esc(v.hasta)}</b> a las ${esc(v.paradas.at(-1).hora)}.
+          ${v.operador ? esc(v.operador) : ""}${v.circula ? "" : " · No circula hoy."}
+        </p>
+        <ol class="ruta__paradas">
+          ${v.paradas.map((p) => {
+            const m = min(p.enMin);
+            const pasada = m != null && m < 0;
+            const esAqui = p.id === aqui;
+            return `<li class="ruta__parada ${p.final ? "is-final" : ""} ${pasada ? "is-pasada" : ""} ${esAqui ? "is-aqui" : ""}">
+              <a href="/bus.html?p=${encodeURIComponent(p.id)}">
+                <span class="ruta__hora">${esc(p.hora)}</span>
+                <span class="ruta__nom">${esc(p.name)}${esAqui ? ` <span class="viaje__aqui">tu parada</span>` : ""}</span>
+                <span class="ruta__min">${m == null ? "" : m === 0 ? "ahora" : m > 0 ? "+" + m + "′" : ""}</span>
+              </a></li>`;
+          }).join("")}
+        </ol>
+      </div>`;
+    }
+
+    function pintarSalidas() {
+      const cont = $("deps");
+      if (!datos) return;
+      // Con el momento forzado hay que decirlo: si no, un tablero del mes que
+      // viene se lee exactamente igual que el de ahora.
+      $("deps-hint").textContent = !datos.ahora ? ""
+        : datos.forzado ? `momento forzado: ${datos.fecha_servicio} ${datos.ahora}`
+        : `hora de la red ${datos.ahora}`;
+      $("clock").textContent = datos.ahora ? `· ${datos.ahora}` : "";
+
+      const lista = datos.salidas.filter((s) => (minutosAhora(s.enMin) ?? 0) >= -1);
+
+      if (!lista.length) {
+        // Hay 38 postes en toda Catalunya donde los buses solo terminan el
+        // recorrido (rda. Sant Pere es el de los nocturnos). Ahí "no pasa nada
+        // en dos horas" es verdad pero engaña: no va a pasar nunca, y ampliar
+        // la ventana no sirve de nada. El motivo real se dice.
+        if (datos.parada?.fuente === "gtfs" && !(datos.parada.lineas || []).length) {
+          cont.innerHTML = `<div class="empty">
+            <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">⤓</div>
+            <p><b>Aquí los buses solo terminan el recorrido.</b><br>
+            De esta parada no sale ninguno. Cada sentido de la calle tiene su
+            propio poste: busca el del sentido en el que quieras ir.</p></div>`;
+          return;
+        }
+        const horas = Math.round(ventana / 60);
+        const cuanto = horas >= 24 ? "el resto del día" : `las próximas ${horas === 1 ? "hora" : horas + " h"}`;
+        // Con una línea elegida se la nombra: "la N82 no pasa" dice bastante
+        // más que "ningún bus con este filtro", y es justo lo que se venía a
+        // preguntar. La ventana se puede ampliar también con filtro puesto: es
+        // la única manera de saber a qué hora vuelve a pasar.
+        const siguiente = ventana < 360 ? 360 : 1440;
+        cont.innerHTML = `<div class="empty">
+          <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">🌙</div>
+          <p><b>${filtro ? `La ${esc(filtro)} no pasa por aquí en ${cuanto}.`
+              : destinoSel ? `Ningún bus hacia ${esc(destinoSel)} en ${cuanto}.`
+              : `No pasa ningún bus por aquí en ${cuanto}.`}</b><br>
+          ${filtro || destinoSel
+            ? "Puedes ampliar la ventana o quitar el filtro."
+            : "De madrugada casi toda la red está parada."}</p>
+          ${ventana >= 1440 ? "" :
+            `<button class="chip" id="ampliar" style="margin-top:12px">Mirar ${
+              siguiente === 360 ? "las próximas 6 h" : "todo el día"}</button>`}
+        </div>`;
+        const b = $("ampliar");
+        if (b) b.onclick = () => { ventana = siguiente; cargar(); };
+        return;
+      }
+
+      // Lista plana y cronológica, sin agrupar por sentido: aquí una parada es
+      // un poste, y un poste ya sirve un solo sentido de la calzada. Agrupar
+      // sería inventarse una división que no existe.
+      //
+      // El recorrido desplegado va detrás de su fila, dentro del mismo panel: se
+      // vuelve a pintar en cada repintado, así que no se cierra solo.
+      cont.innerHTML = lista.map((s) =>
+        filaHTML(s) + (s.viaje && abierto?.viaje === s.viaje ? panelViaje() : "")).join("");
+
+      // Si la fila desplegada ha desaparecido del tablero (ya pasó), se recoge.
+      if (abierto && !lista.some((s) => s.viaje === abierto.viaje)) abierto = null;
+
+      cont.querySelectorAll(".dep__toggle[data-viaje]").forEach((b) => {
+        b.onclick = () => alternarViaje(b.dataset.viaje);
+      });
+    }
+
+    // Cada cuánto se vuelve a pedir el tablero. Un horario no cambia solo, así
+    // que sin filas en vivo basta con desplazar la ventana de vez en cuando;
+    // con iBus de por medio, la gracia está en el refresco.
+    const hayVivo = () =>
+      !!(datos && (datos.parada?.tmb || datos.salidas?.some((s) => s.tiempoReal)));
+
+    function pintarAviso() {
+      const el = $("feedwarn");
+      const aviso = datos?.fuentes?.gtfs?.aviso;
+      el.hidden = !aviso;
+      el.textContent = aviso || "";
+    }
+
+    async function cargar() {
+      if (vista !== "parada" || !sel) return;
+      ultimaCarga = Date.now();
+      try {
+        const p = new URLSearchParams();
+        if (filtro) p.set("linea", filtro);
+        if (destinoSel) p.set("destino", destinoSel);
+        if (ventana !== 120) p.set("ventana", String(ventana));
+        for (const [k, v] of Object.entries(depuracion)) p.set(k, v);
+        const qs = p.toString();
+        datos = await getJSON(`/api/bus/parada/${encodeURIComponent(sel.id)}/salidas${qs ? "?" + qs : ""}`);
+        baseMs = Date.now();
+        pintarAviso();
+        pintarResumen();
+        pintarFiltros();
+        pintarSalidas();
+        setLive(true);
+      } catch (e) {
+        setLive(false);
+        if (!datos) {
+          $("deps").innerHTML = `<div class="empty">
+            <div class="empty__icon" style="background:var(--alert-bg);color:var(--alert)">!</div>
+            <p><b>No se pudo leer el horario de bus.</b><br>Reintentando en unos segundos…</p>
+          </div>`;
+        }
+      }
+    }
+
+    /* ----------------------------------------------------------------- inicio */
+
+    // El feed son 25 MB: el primer arranque del servidor puede estar bajándolo.
+    // Se enseña un esqueleto y se espera, en vez de dar un error que no lo es.
+    async function esperarFeed() {
+      for (let i = 0; i < 60; i++) {
+        try {
+          const est = await getJSON("/api/bus/estado");
+          if (est.estado === "listo") return true;
+          $("deps").innerHTML = `<div class="empty">
+            <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">↓</div>
+            <p><b>Preparando el horario de bus…</b><br>
+            La primera vez hay que descargar el horario de toda Catalunya (25 MB). Un momento.</p></div>`;
+        } catch (e) {
+          setLive(false);
+          return false;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      return false;
+    }
+
+    async function init() {
+      $("q").addEventListener("input", (e) => {
+        $("clear").hidden = !e.target.value;
+        pintarOpciones(e.target.value);
+      });
+      $("q").addEventListener("focus", (e) => pintarOpciones(e.target.value));
+      $("q").addEventListener("blur", () => setTimeout(cerrarOpciones, 120));
+      $("q").addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown") { e.preventDefault(); mover(1); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); mover(-1); }
+        else if (e.key === "Enter") {
+          const items = [...$("opts").querySelectorAll(".picker__opt")];
+          const li = items[marcado >= 0 ? marcado : 0];
+          if (!li) return;
+          e.preventDefault();
+          if (li.dataset.linea) elegirLinea(li.dataset.linea);
+          else elegir(li.dataset.id);
+        } else if (e.key === "Escape") cerrarOpciones();
+      });
+      $("clear").onclick = () => { $("q").value = ""; $("clear").hidden = true; $("q").focus(); pintarOpciones(""); };
+
+      if (!(await esperarFeed())) return;
+
+      // ?l= manda sobre ?p=: si alguien comparte el enlace de una línea, es esa
+      // la que quiere ver. Si no hay nada en la URL, la última parada usada.
+      const u = new URLSearchParams(location.search);
+      const codigo = u.get("l");
+      const id = u.get("p") || localStorage.getItem("paradaBus");
+      if (codigo) await elegirLinea(codigo);
+      else if (id) await elegir(id);
+      else $("deps").innerHTML = `<div class="empty">
+        <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">⌕</div>
+        <p><b>Elige tu parada o tu línea.</b><br>Escribe el nombre de una parada
+        (“Meridiana”) o el código de un bus (“N82”).</p></div>`;
+
+      // Un solo temporizador: repinta siempre (los minutos bajan solos) y
+      // recarga cuando toca. El recorrido de una línea no cambia, así que basta
+      // con refrescarlo cada 5 min para que avance el próximo paso.
+      setInterval(() => {
+        if (vista === "linea") {
+          pintarRecorridos();
+          if (linea && Date.now() - ultimaCarga >= 300_000) elegirLinea(linea.linea);
+          return;
+        }
+        pintarSalidas();
+        if (Date.now() - ultimaCarga >= (hayVivo() ? 30_000 : 300_000)) cargar();
+      }, 15_000);
+    }
+
+    init();
+  </script>
+</body>
+</html>

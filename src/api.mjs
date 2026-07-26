@@ -14,6 +14,8 @@
 // OJO: /departures y /trains son EN VIVO: solo devuelven datos en horario
 // de servicio (~05:00–00:30). Fuera de horario: trains:[] o 500 "Dades no disponibles".
 
+import { cached } from "./cache.mjs";
+
 const BASE = "https://serveisgrs.rodalies.gencat.cat/api";
 const UA = "rodalies-rt (uso personal)";
 
@@ -31,19 +33,7 @@ async function getJson(path, { timeout = 12_000 } = {}) {
   return res.json();
 }
 
-// --- Caché en memoria con TTL ---
-function cached(ttlMs) {
-  const store = new Map(); // key -> { at, val }
-  return async (key, producer) => {
-    const hit = store.get(key);
-    if (hit && Date.now() - hit.at < ttlMs) return hit.val;
-    const val = await producer();
-    store.set(key, { at: Date.now(), val });
-    return val;
-  };
-}
-
-const cacheStatic = cached(60 * 60_000); // líneas/estaciones: 1 h
+export const cacheStatic = cached(60 * 60_000); // líneas/estaciones: 1 h
 const cacheLive = cached(20_000); // salidas: 20 s
 
 export async function getLines() {

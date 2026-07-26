@@ -43,6 +43,48 @@
     return `<span class="bullet bullet--${size || "md"}" style="background:${c};color:${textOn(c)}">${esc(code)}</span>`;
   }
 
+  /* ------------------------------------------------------------------ bus */
+
+  // Las líneas de bus son ~950 códigos: el mapa COLORES no puede cubrirlas, y
+  // tampoco tendría sentido (nadie reconoce 950 colores).
+  //
+  // La distinción de MODO va en la FORMA, no en el color: el bullet de bus es
+  // un óvalo completo, que además es lo que parece la señalética de autobús.
+  // Así el color queda libre para ser arbitrario sin que se confunda nunca con
+  // una línea de Rodalies, y el rojo de marca sigue reservado.
+  //
+  // Todos estos tonos están por DEBAJO del umbral de luminancia de textOn(), o
+  // sea que el bullet de bus siempre sale en blanco sobre medio-oscuro. No es
+  // un apaño del contraste: el tratamiento uniforme refuerza "esto es el bus",
+  // mientras la paleta variada del tren conserva su carácter.
+  const PALETA_BUS = [
+    "#3d6b8e", "#2f7d6a", "#7a6aa8", "#8a6a3d", "#4d7a3d", "#8a4f6b", "#3f6f7f",
+    "#6b5f8a", "#7f6a4a", "#4a6b5a", "#7a5a5a", "#5a6f8a", "#2e6f5e", "#6f4f7a",
+  ];
+
+  // FNV-1a de 32 bits: determinista y estable entre sesiones y entre páginas,
+  // que es lo único que importa aquí (la misma línea, siempre el mismo color).
+  function hash32(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return h >>> 0;
+  }
+
+  // Si la fuente publica un color oficial (TMB lo hace: COLOR_LINIA), manda ese.
+  const colorBus = (code, oficial) =>
+    oficial || PALETA_BUS[hash32(String(code || "").toUpperCase()) % PALETA_BUS.length];
+
+  function bulletBus(code, size, oficial, oficialTexto) {
+    const c = colorBus(code, oficial);
+    const txt = oficialTexto || textOn(c);
+    // Hay 25 códigos con espacio ("471 495") y otros como "C3Connect": el óvalo
+    // crece, pero a partir de 5 caracteres la letra baja para que no reviente
+    // la fila.
+    const largo = String(code || "").length > 5 ? " bullet--largo" : "";
+    return `<span class="bullet bullet--bus bullet--${size || "md"}${largo}" ` +
+           `style="background:${c};color:${txt}">${esc(code)}</span>`;
+  }
+
   // "hace 5 min" / "hace 2 h" a partir de un timestamp unix (segundos).
   function timeAgo(unixSec) {
     if (!unixSec) return "";
@@ -68,5 +110,6 @@
     return r.json();
   }
 
-  w.RR = { COLORES, color, esc, textOn, mix, tint, bullet, timeAgo, clockAt, getJSON };
+  w.RR = { COLORES, color, esc, textOn, mix, tint, bullet, timeAgo, clockAt, getJSON,
+           PALETA_BUS, colorBus, bulletBus };
 })(window);

@@ -7,6 +7,12 @@ import { getIncidencias, getEstadoLineas } from "./rodalies.mjs";
 import { getLines, getStations } from "./api.mjs";
 import { getLineaEnVivo } from "./liveLine.mjs";
 import { getSalidasParada } from "./stopBoard.mjs";
+import { asegurarIndice } from "./gtfsIndex.mjs";
+import {
+  getEstadoBus, buscarParadasBus, getParadaBus,
+  getSalidasParadaBus, getParadasBusCercaEstacion,
+  buscarTodo, getLineaBus, getViajeBus,
+} from "./busBoard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -26,8 +32,10 @@ const wrap = (fn) => (req, res) =>
     console.error(err);
     // Un 404 nuestro (parada/línea inexistente) no es un fallo del feed.
     const code = err.status === 404 ? 404 : 502;
+    // Hay tres feeds en juego (Renfe, Rodalies y el GTFS de bus): culpar
+    // siempre a Renfe despistaba al depurar.
     res.status(code).json({
-      error: code === 404 ? String(err.message) : "No se pudo leer el feed de Renfe",
+      error: code === 404 ? String(err.message) : `No se pudo leer ${err.fuente || "el feed"}`,
       detalle: String(err.message || err),
     });
   });
@@ -88,10 +96,90 @@ app.get("/api/parada/:id/salidas", wrap(async (req, res) => {
   res.json(await getSalidasParada(req.params.id, { linea, sentido, limite }));
 }));
 
+// --- BUS: horarios (GTFS de la Generalitat) + tiempo real (iBus de TMB) ---
+
+// Estado del feed de bus: si está listo, de cuándo es y hasta cuándo vale.
+// Responde AL MOMENTO aunque se esté descargando, para que la web pueda pintar
+// un esqueleto en vez de quedarse colgada. ?force=1 comprueba si hay versión nueva.
+app.get("/api/bus/estado", wrap(async (req, res) => {
+  res.json(await getEstadoBus({ force: req.query.force === "1" }));
+}));
+
+// Buscador de paradas de bus. Son 9.010, así que el filtrado es del servidor:
+// mandar el catálogo entero al navegador serían más de 1 MB por visita.
+// ?q= nombre (sin acentos) · ?lat=&lon=&r= alternativa por cercanía · ?limite=
+app.get("/api/bus/paradas", wrap(async (req, res) => {
+  const num = (v) => (v == null ? null : Number(v));
+  res.json(await buscarParadasBus(req.query.q || "", {
+    limite: Math.min(50, Math.max(1, Number(req.query.limite) || 20)),
+    lat: num(req.query.lat),
+    lon: num(req.query.lon),
+    radio: Math.min(3000, Math.max(50, Number(req.query.r) || 600)),
+  }));
+}));
+
+// Buscador único: a veces no se busca una parada, se busca un bus. Devuelve
+// líneas Y paradas para que la interfaz no obligue a elegir modo antes de saber
+// qué se está buscando.
+app.get("/api/bus/buscar", wrap(async (req, res) => {
+  res.json(await buscarTodo(req.query.q || "", {
+    limite: Math.min(50, Math.max(1, Number(req.query.limite) || 20)),
+  }));
+}));
+
+// Recorrido de una línea, por sentidos, con las horas del próximo paso:
+// /api/bus/linea/N82 · ?fecha=&hora= igual que el tablero.
+app.get("/api/bus/linea/:codigo", wrap(async (req, res) => {
+  res.json(await getLineaBus(req.params.codigo, {
+    fecha: req.query.fecha ? Number(req.query.fecha) : null,
+    hora: req.query.hora ? String(req.query.hora) : null,
+  }));
+}));
+
+// Recorrido de UN autobús concreto, el de una fila del tablero: de dónde viene,
+// por dónde ha pasado y hasta dónde sigue. /api/bus/viaje/1685576
+app.get("/api/bus/viaje/:id", wrap(async (req, res) => {
+  res.json(await getViajeBus(req.params.id, {
+    fecha: req.query.fecha ? Number(req.query.fecha) : null,
+    hora: req.query.hora ? String(req.query.hora) : null,
+  }));
+}));
+
+// Ficha de una parada: /api/bus/parada/gen:PF08019187
+app.get("/api/bus/parada/:id", wrap(async (req, res) => {
+  res.json(await getParadaBus(req.params.id));
+}));
+
+// Próximos buses desde una parada.
+// ?linea=L63 · ?destino=… · ?ventana=120 (min) · ?limite=N
+// ?fecha=20260801&hora=00:10 fuerza el momento (para probar el cambio de día).
+app.get("/api/bus/parada/:id/salidas", wrap(async (req, res) => {
+  res.json(await getSalidasParadaBus(req.params.id, {
+    linea: req.query.linea ? String(req.query.linea) : null,
+    destino: req.query.destino ? String(req.query.destino) : null,
+    ventana: Math.min(1440, Math.max(15, Number(req.query.ventana) || 120)),
+    limite: Math.min(60, Math.max(1, Number(req.query.limite) || 30)),
+    fecha: req.query.fecha ? Number(req.query.fecha) : null,
+    hora: req.query.hora ? String(req.query.hora) : null,
+  }));
+}));
+
+// Paradas de bus cerca de una ESTACIÓN de Rodalies (id del GRS, sin prefijo).
+app.get("/api/parada/:id/buses", wrap(async (req, res) => {
+  res.json(await getParadasBusCercaEstacion(req.params.id, {
+    radio: Math.min(1500, Math.max(50, Number(req.query.radio) || 400)),
+    limite: Math.min(20, Math.max(1, Number(req.query.limite) || 6)),
+  }));
+}));
+
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.use(express.static(join(__dirname, "..", "public")));
 
 app.listen(PORT, () => {
   console.log(`Rodalies RT en http://localhost:${PORT}`);
+  // El GTFS de bus son 25 MB: se baja en segundo plano y DESPUÉS de escuchar.
+  // Si esto bloqueara el arranque, la parte de trenes —que ya funcionaba— se
+  // quedaría esperando a los autobuses para dar señales de vida.
+  asegurarIndice().catch((e) => console.error("GTFS bus:", e.message));
 });

@@ -638,4 +638,261 @@ a.linecard:hover .linecard__go { transform: translateX(3px); color: var(--ink); 
 }
 @media (max-width: 400px) {
   .brand__txt { display: none; }
+  /* Con cuatro enlaces la nav va justa. Antes que un menú desplegable —que
+     esconde tres destinos para ganar 20 px— se deja deslizar en horizontal. */
+  .topbar__nav { overflow-x: auto; scrollbar-width: none; }
+  .topbar__nav::-webkit-scrollbar { display: none; }
+}
+
+/* =========================================================================
+   BUS · interurbanos con horario + urbanos de Barcelona en tiempo real
+   Todo reutiliza los tokens de arriba: la diferencia de modo se dice con la
+   FORMA (el bullet de bus es un óvalo) y no con colores nuevos.
+   ========================================================================= */
+
+/* Óvalo completo, como la señalética de autobús. Es lo que impide confundir
+   una línea de bus con una de Rodalies, ya que sus colores son arbitrarios. */
+.bullet--bus { border-radius: var(--r-pill); }
+/* "471 495", "C3Connect": a partir de cinco caracteres la letra baja para que
+   el óvalo no empuje la fila. */
+.bullet--bus.bullet--largo { font-size: .8em; letter-spacing: -.01em; }
+
+/* Fila de bus: la del tren tiene la columna de vía; un bus no tiene andén, así
+   que ahí va el desplegable del recorrido en vez de un hueco vacío. */
+.dep--bus { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.dep__toggle {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 30px; height: 30px; padding: 0;
+  border: 1px solid var(--hair); border-radius: 50%;
+  background: var(--paper); color: var(--ink-3);
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+  text-decoration: none;
+  transition: transform .15s, border-color .13s, color .13s;
+}
+.dep__toggle:hover { border-color: var(--hair-2); color: var(--ink); }
+.dep.is-abierta .dep__toggle { transform: rotate(180deg); border-color: var(--ink-3); color: var(--ink); }
+.dep.is-abierta { background: color-mix(in srgb, var(--wash) 55%, transparent); }
+
+/* Recorrido de un bus concreto, desplegado bajo su fila. Reutiliza el raíl de
+   puntos de la vista de línea: es el mismo objeto (un trazado), así que se lee
+   igual en los dos sitios. */
+.viaje {
+  padding: 4px 18px 14px;
+  background: color-mix(in srgb, var(--wash) 55%, transparent);
+  border-top: 1px dashed var(--hair);
+}
+.viaje__meta { margin: 8px 0 10px; font-size: 12.5px; color: var(--ink-2); }
+.viaje__meta b { color: var(--ink); }
+.viaje__aqui {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  background: var(--ink); color: var(--paper); padding: 1px 7px; border-radius: var(--r-pill);
+}
+/* Las que ya dejó atrás se apagan: siguen siendo información (por dónde ha
+   venido) pero no son lo que se está mirando. */
+.viaje .ruta__parada.is-pasada .ruta__hora,
+.viaje .ruta__parada.is-pasada .ruta__nom { color: var(--ink-3); }
+.viaje .ruta__parada.is-pasada a::after { box-shadow: inset 0 0 0 2px var(--hair); }
+.viaje .ruta__parada.is-aqui a::after { box-shadow: inset 0 0 0 3px var(--ok); background: var(--ok); }
+.viaje .ruta__parada.is-aqui .ruta__nom { color: var(--ink); font-weight: 700; }
+.viaje .ruta__parada a { grid-template-columns: 46px minmax(0, 1fr) auto; }
+.ruta__min {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+/* Un minuto de iBus está medido; uno de horario está publicado. Se distinguen
+   con el mismo verde que ya usa el resto de la casa para "en vivo". */
+.dep--bus.is-vivo .dep__min { color: var(--ok); }
+.dep__vivo {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 700; color: var(--ok-ink);
+}
+.dep__vivo .live__dot { width: 6px; height: 6px; }
+/* Etiqueta discreta: recuerda que esa hora es de horario, no de un bus visto. */
+.dep__horario {
+  font-family: var(--font-ui); font-weight: 600; font-size: 10.5px;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3);
+}
+
+/* Línea que para aquí pero hoy no pasa dentro de la ventana. Sigue siendo
+   pulsable —es la única forma de preguntar cuándo vuelve—, solo pesa menos. */
+.chip--mudo { color: var(--ink-3); border-style: dashed; }
+.chip--mudo:hover { color: var(--ink-2); }
+.chip--mudo.is-on { color: var(--paper); border-style: solid; }
+
+/* Tira de resumen por línea. En una parada de diez líneas es la vista que de
+   verdad se usa: buscas tu bullet y lees un número. */
+.busresumen {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-top: 18px;
+}
+.busres {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--paper); border: 1px solid var(--hair);
+  border-radius: var(--r-pill); padding: 5px 13px 5px 6px;
+  font: inherit; cursor: pointer; max-width: 100%;
+  box-shadow: var(--sh-1);
+  transition: border-color .13s, transform .13s, box-shadow .13s;
+}
+.busres:hover { border-color: var(--hair-2); transform: translateY(-1px); }
+.busres.is-on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.busres__min {
+  font-family: var(--font-display); font-weight: 800; font-size: 15px;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.busres__min.is-vivo { color: var(--ok); }
+.busres__dest {
+  font-size: 12.5px; color: var(--ink-3); font-weight: 600;
+  max-width: 15ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Banda de caducidad del horario. Un horario estático no "caduca" fila a fila,
+   pero el feed entero sí: sin este aviso, un feed viejo da un tablero vacío
+   para siempre y sin explicación. */
+.feedwarn {
+  margin-top: 18px; padding: 10px 15px;
+  background: var(--delay-bg); color: var(--delay-ink);
+  border-radius: var(--r-sm); font-size: 13px; font-weight: 600;
+}
+
+/* Pista del buscador de bus (el catálogo se consulta al servidor, así que hace
+   falta decir por qué no sale nada con una sola letra). */
+.picker__hint { padding: 14px; color: var(--ink-3); font-size: 13px; text-align: center; }
+/* Una parada de TMB no publica sus líneas; sí sus buses en vivo. */
+.picker__vivo {
+  font-size: 11px; font-weight: 700; color: var(--ok-ink);
+  background: var(--ok-bg); padding: 2px 9px; border-radius: var(--r-pill);
+}
+
+/* Buscador: dos clases de respuesta en una sola lista. Las líneas arriba, con
+   su cabecerita, porque "N82" es una respuesta exacta y una calle no. */
+.picker__grupo {
+  padding: 8px 11px 4px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.picker__opt .picker__rec {
+  font-weight: 600; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.picker__go { font-size: 11.5px; font-weight: 700; color: var(--ink-3); white-space: nowrap; }
+.picker__opt:hover .picker__go, .picker__opt.is-on .picker__go { color: var(--ink); }
+
+/* -------------------------------------------------------------------------
+   Recorrido de una línea de bus: "¿por dónde pasa la N82?"
+   Un sentido por bloque plegable, y dentro el trazado poste a poste con la
+   hora del próximo paso. La rejilla es hora + nombre para que la columna de
+   horas se pueda leer en vertical, como un horario de papel.
+   ------------------------------------------------------------------------- */
+.lineahero__nom {
+  display: block; margin-top: 10px;
+  font-family: var(--font-display); font-weight: 700;
+  font-size: clamp(1.1rem, 2.6vw, 1.5rem); letter-spacing: -.015em; line-height: 1.15;
+}
+
+.ruta {
+  background: var(--paper); border: 1px solid var(--hair);
+  border-radius: var(--r-card); box-shadow: var(--sh-1);
+  padding: 4px 0; margin-bottom: 12px; overflow: clip;
+}
+.ruta__head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 18px; cursor: pointer; list-style: none;
+}
+.ruta__head::-webkit-details-marker { display: none; }
+.ruta__head:hover { background: color-mix(in srgb, var(--wash) 45%, transparent); }
+.ruta__arrow {
+  display: inline-grid; place-items: center; flex: 0 0 auto;
+  width: 20px; height: 20px; border-radius: 6px;
+  background: var(--ink-2); color: var(--paper);
+  font-size: 11px; line-height: 1;
+  transition: transform .15s;
+}
+.ruta[open] .ruta__arrow { transform: rotate(90deg); }
+.ruta__hacia {
+  min-width: 0; font-size: 13.5px; color: var(--ink-2);
+  font-weight: 600; letter-spacing: .01em;
+}
+.ruta__hacia b { color: var(--ink); font-weight: 700; }
+.ruta__var { display: block; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.ruta__sale {
+  margin-left: auto; flex: 0 0 auto;
+  font-family: var(--font-mono); font-size: 13px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.ruta__sale b { font-size: 15px; color: var(--ink); }
+.ruta__sin { margin-left: auto; font-size: 12px; color: var(--ink-3); font-weight: 600; }
+.ruta__nota, .ruta__pie {
+  margin: 0; padding: 0 18px 10px; font-size: 12.5px; color: var(--ink-3);
+}
+.ruta__pie { padding-top: 10px; border-top: 1px solid var(--hair); }
+
+.ruta__paradas { list-style: none; margin: 0; padding: 0 18px; }
+.ruta__parada a {
+  display: grid; grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center; gap: 12px;
+  padding: 7px 0 7px 20px; position: relative;
+  text-decoration: none; color: inherit;
+}
+/* El raíl y los puntos: es el trazado, dicho con dos pseudoelementos en vez de
+   con un SVG. El punto va sobre el raíl, no al lado. */
+.ruta__parada a::before {
+  content: ""; position: absolute; left: 4px; top: 0; bottom: 0;
+  width: 2px; background: var(--hair-2);
+}
+.ruta__parada:first-child a::before { top: 50%; }
+.ruta__parada:last-child a::before { bottom: 50%; }
+.ruta__parada a::after {
+  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--paper); box-shadow: inset 0 0 0 2px var(--hair-2);
+}
+.ruta__parada:first-child a::after,
+.ruta__parada.is-final a::after { box-shadow: inset 0 0 0 3px var(--ink-2); }
+.ruta__parada a:hover .ruta__nom { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.ruta__hora {
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.ruta__nom {
+  min-width: 0; font-size: 13.5px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ruta__parada:first-child .ruta__nom,
+.ruta__parada.is-final .ruta__nom { color: var(--ink); font-weight: 700; }
+
+/* Paradas de bus junto a la estación, al final del panel de tren. Filas con
+   filete, sin tarjetas ni sombras: es un apéndice, no una segunda portada. */
+.nearbus {
+  background: var(--paper); border: 1px solid var(--hair);
+  border-radius: var(--r-card); box-shadow: var(--sh-1); overflow: clip;
+}
+.nearbus__row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 18px; text-decoration: none; color: inherit;
+  border-top: 1px solid var(--hair);
+  transition: background .12s;
+}
+.nearbus__row:first-child { border-top: none; }
+.nearbus__row:hover { background: color-mix(in srgb, var(--wash) 45%, transparent); }
+.nearbus__lines { display: flex; gap: 4px; flex: 0 0 auto; max-width: 42%; overflow: hidden; }
+.nearbus__name {
+  font-weight: 600; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nearbus__m {
+  margin-left: auto; flex: 0 0 auto;
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 560px) {
+  .busres__dest { display: none; }
+  .nearbus__row { padding: 11px 14px; }
+  .nearbus__lines { max-width: 34%; }
+  /* La fila de bus tiene una columna más que la de tren (el desplegable), así
+     que aquí se aprieta en vez de recortarle sitio al destino. */
+  .dep--bus { gap: 10px; }
+  .dep__toggle { width: 26px; height: 26px; font-size: 13px; }
+  .viaje { padding: 4px 14px 12px; }
+  .viaje .ruta__parada a { grid-template-columns: 42px minmax(0, 1fr) auto; gap: 8px; }
 }

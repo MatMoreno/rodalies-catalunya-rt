@@ -21,6 +21,7 @@
       <a href="/" class="navlink is-active">Mi parada</a>
       <a href="/estado.html" class="navlink">Estado</a>
       <a href="/linea.html" class="navlink">Trenes en vivo</a>
+      <a href="/bus.html" class="navlink">Buses</a>
     </nav>
     <div class="topbar__meta">
       <span class="live" id="live"><span class="live__dot"></span><span>En vivo</span></span>
@@ -64,6 +65,17 @@
         </div>
       </div>
     </section>
+
+    <!-- Buses al lado de la estación. Va DESPUÉS del tablero y aparte de él:
+         para quien no le sirva (la mayoría de estaciones del interior) sigue
+         oculta y no desplaza nada. -->
+    <section class="section" id="sec-bus" hidden>
+      <div class="section__head">
+        <h2>Buses desde aquí al lado</h2>
+        <span class="section__hint">a menos de 400 m andando</span>
+      </div>
+      <div class="nearbus" id="nearbus"></div>
+    </section>
   </main>
 
   <footer class="foot">
@@ -74,7 +86,7 @@
 
   <script src="/shared.js"></script>
   <script>
-    const { esc, bullet, getJSON } = window.RR;
+    const { esc, bullet, bulletBus, getJSON } = window.RR;
 
     let paradas = [];        // catálogo completo
     let sel = null;          // parada elegida
@@ -165,6 +177,37 @@
         <div class="skeleton sk-card" style="height:74px"></div>
         <div class="skeleton sk-card" style="height:74px"></div>`;
       cargar();
+      cargarBuses(p.id);
+    }
+
+    /* ------------------------------------------------- buses de al lado */
+
+    // Se pide UNA vez por estación elegida, no en cargar() ni en ningún
+    // temporizador: las paradas de bus no se mueven cada 30 s.
+    //
+    // Y falla en silencio a propósito. Esto es un extra al final de la página;
+    // si la petición se cae, no puede ensuciar el indicador "En vivo", que es
+    // del feed de Rodalies, ni tapar el tablero de trenes, que sí funciona.
+    async function cargarBuses(estacionId) {
+      $("sec-bus").hidden = true;
+      try {
+        const j = await getJSON(`/api/parada/${encodeURIComponent(estacionId)}/buses?radio=400&limite=6`);
+        // Si mientras llegaba la respuesta se ha cambiado de estación, sobra.
+        if (!sel || sel.id !== estacionId || !j.paradas.length) return;
+        $("nearbus").innerHTML = j.paradas.map((p) => {
+          // Una parada de TMB no publica qué líneas paran en ella: solo se sabe
+          // en vivo. En su sitio va la etiqueta, y así la fila no queda muda.
+          const marca = p.lineas && p.lineas.length
+            ? p.lineas.slice(0, 3).map((l) => bulletBus(l, "sm")).join("")
+            : p.fuente === "tmb" ? `<span class="picker__vivo">en vivo</span>` : "";
+          return `<a class="nearbus__row" href="/bus.html?p=${encodeURIComponent(p.id)}">
+            <span class="nearbus__lines">${marca}</span>
+            <span class="nearbus__name">${esc(p.name)}</span>
+            <span class="nearbus__m">a ${p.metros} m</span>
+          </a>`;
+        }).join("");
+        $("sec-bus").hidden = false;
+      } catch (e) { /* en silencio: es un extra, no el motivo de la página */ }
     }
 
     // Dos filas de filtros: primero el sentido (que es lo que decide si un tren te
