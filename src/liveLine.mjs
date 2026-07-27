@@ -8,6 +8,7 @@
 //   repartidas por la línea, juntamos los trenes de esa línea y deduplicamos.
 
 import { getLine, getDepartures } from "./api.mjs";
+import { parseHora, proximaParada, registroCaducado, mismaEstacion } from "./tren.mjs";
 
 // Ejecuta tareas con concurrencia limitada.
 async function mapLimit(items, limit, fn) {
@@ -34,7 +35,6 @@ function estacionesSonda(stations, max = 12) {
   return [...idx].sort((a, b) => a - b).map((i) => stations[i]);
 }
 
-const parseHora = (s) => (s ? new Date(s).getTime() : NaN);
 const hhmm = (s) => (s ? String(s).slice(11, 16) : null);
 // Suma (o resta) minutos a un "HH:MM" con vuelta de día, sin depender de la zona horaria.
 function addMinToHHMM(hhmmStr, min) {
@@ -46,20 +46,12 @@ function addMinToHHMM(hhmmStr, min) {
 const claveTren = (t) =>
   `${t.commercialNumber ?? t.technicalNumber}|${t.launchingDate ?? ""}`;
 
-// Compara dos referencias de estación de la API (por id, con el nombre de red).
-export function mismaEstacion(a, b) {
-  if (!a || !b) return false;
-  if (a.id != null && b.id != null) return String(a.id) === String(b.id);
-  return !!a.name && a.name === b.name;
-}
-
 const SEG_MS = 180_000; // duración típica entre paradas (~3 min) para interpolar
-const MIN_CADUCADO = -3; // margen antes de dar un registro por caducado
 
 // Sitúa un tren entre dos paradas usando la hora de la API (no la de la máquina)
 // y el tiempo que falta para su próxima parada.
 //
-// Devuelve null si el registro está caducado (ver `esFantasma` más abajo).
+// Devuelve null si el registro está caducado (ver `registroCaducado` en tren.mjs).
 function situarTren(train, lineStations, lineIndex) {
   const stops = (train.stations || [])
     .map((s) => ({ id: String(s.id), name: s.name, li: lineIndex.get(String(s.id)), arr: s.arrivalDateHour, dep: s.departureDateHour }))
@@ -70,7 +62,12 @@ function situarTren(train, lineStations, lineIndex) {
   // "Ahora" según la API (misma zona que las llegadas) → cuentas correctas.
   const nowRef = parseHora(train.__apiNow) || Date.now();
 
-  // Sentido: la API solo da paradas futuras, en orden de viaje.
+  // Registro caducado ("fantasma"): la API conserva trenes que ya no circulan,
+  // con las horas congeladas y un delay imposible (−50 min).
+  if (registroCaducado(train, nowRef)) return null;
+
+  // Sentido: `stations[]` es el recorrido completo, en orden de viaje, así que
+  // va del origen al destino.
   let dir;
   if (stops.length >= 2) dir = stops[stops.length - 1].li >= stops[0].li ? 1 : -1;
   else {
@@ -78,7 +75,16 @@ function situarTren(train, lineStations, lineIndex) {
     dir = destLi != null && destLi < stops[0].li ? -1 : 1;
   }
 
-  const next = stops[0]; // la primera pendiente = próxima parada
+  // La próxima parada es la que declara la API, buscada dentro del recorrido.
+  // NO es `stations[0]`: ese es el ORIGEN del tren, y tomarlo por la próxima
+  // parada situaba a todo tren en marcha en la estación de la que salió —o lo
+  // hacía desaparecer por caducado, que es lo que vaciaba el tablero.
+  const prox = proximaParada(train, nowRef);
+  const iNext = prox ? stops.findIndex((s) => s.id === String(prox.id)) : -1;
+  if (iNext < 0) return null;
+
+  const pendientes = stops.slice(iNext); // lo que le queda de viaje por esta línea
+  const next = pendientes[0];
   const nextLi = next.li;
 
   // OJO: stations[].arrivalDateHour NO es el horario programado, es un ETA EN VIVO
@@ -90,10 +96,6 @@ function situarTren(train, lineStations, lineIndex) {
   const t1 = parseHora(next.arr || next.dep);
   const enMin = Number.isFinite(t1) ? Math.round((t1 - nowRef) / 60_000) : null;
 
-  // Registro caducado ("fantasma"): la API conserva trenes cuya próxima parada ya
-  // pasó hace rato, y los delata un delay imposible (−50 min). No circulan.
-  if (enMin != null && enMin < MIN_CADUCADO) return null;
-
   // ¿Ha salido ya? Si su próxima parada sigue siendo la de origen, no: es una
   // salida futura todavía sin formar. Situarla entre dos paradas era lo que
   // apilaba cuatro trenes en el mismo tramo.
@@ -102,7 +104,9 @@ function situarTren(train, lineStations, lineIndex) {
   let frac = null;
   if (!sinSalir && Number.isFinite(t1)) frac = Math.min(1, Math.max(0, 1 - (t1 - nowRef) / SEG_MS));
 
-  const horario = stops.map((s) => {
+  // El horario que se pinta en las columnas es el que queda por delante: las
+  // paradas ya servidas llevan horas pasadas y taparían al tren siguiente.
+  const horario = pendientes.map((s) => {
     const real = hhmm(s.arr || s.dep);
     return { li: s.li, prog: delayMin ? addMinToHHMM(real, -delayMin) : real, real };
   });

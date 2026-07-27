@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Estado en tiempo real de Rodalies de Catalunya (incidencias por línea) a partir del GTFS-Realtime de Renfe.",
   "scripts": {
-    "start": "node src/server.mjs"
+    "start": "node src/server.mjs",
+    "test": "node --test --experimental-test-module-mocks"
   },
   "dependencies": {
     "express": "^4.21.2",

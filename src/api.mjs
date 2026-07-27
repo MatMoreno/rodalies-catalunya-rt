@@ -9,6 +9,9 @@
 //         -> trenes que pasan por la estación EN VIVO, cada uno con:
 //            line, delay (min), nextStation (próxima parada) y
 //            stations[] (todo el recorrido con hora estimada de paso).
+//            OJO: "todo el recorrido" es literal e incluye las paradas YA
+//            SERVIDAS, así que stations[0] es el ORIGEN del tren. La próxima
+//            parada es `nextStation`, nunca stations[0] (ver tren.mjs).
 //   GET /trains/{id}      -> un tren concreto en vivo (mismo detalle).
 //
 // OJO: /departures y /trains son EN VIVO: solo devuelven datos en horario

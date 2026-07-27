@@ -34,6 +34,7 @@ Cuatro fuentes:
 ```bash
 npm install
 npm start              # http://localhost:3020  (PORT para cambiarlo)
+npm test               # pruebas sin red (API simulada)
 ```
 
 - `/`             → **próximos trenes desde tu parada** (la vista principal: a qué
@@ -91,17 +92,32 @@ Bus:
 
 ## Cómo hay que leer los datos de la API de Rodalies
 
-Tres cosas no evidentes, verificadas contra datos reales (sondeando el mismo tren
+Cuatro cosas no evidentes, verificadas contra datos reales (sondeando el mismo tren
 varias veces). Saltárselas produce horarios plausibles pero falsos:
 
-1. **`stations[].arrivalDateHour` es un ETA EN VIVO, no el horario programado**: ya
+1. **`stations[]` es el recorrido COMPLETO, paradas ya servidas incluidas**, así que
+   `stations[0]` es la **estación de origen** del tren, no su próxima parada. La
+   próxima parada es `nextStation`, buscada dentro del recorrido (`src/tren.mjs`).
+   Confundirlas no da una hora ligeramente mala: da un tablero **mutilado**, porque
+   la hora del origen ya pasó y el tren entero se toma por un registro muerto. Se
+   veía así: de los siete trenes hacia Barcelona que pasan por Arenys de Mar en una
+   hora, solo salían los que **aún no habían arrancado** — el que estaba entrando en
+   la estación, no.
+2. **`stations[].arrivalDateHour` es un ETA EN VIVO, no el horario programado**: ya
    incluye el retraso y se mueve solo entre consultas. La hora *prevista* se obtiene
    restando `delay`, nunca sumándolo (si no, el retraso se cuenta dos veces).
-2. **Un tren cuya `nextStation` es su `originStation` todavía no ha salido.** Es una
+3. **Un tren cuya `nextStation` es su `originStation` todavía no ha salido.** Es una
    salida futura, no un tren en marcha: situarlo entre dos paradas amontona varios
    trenes en el mismo tramo.
-3. **El feed arrastra registros caducados**: su próxima parada quedó muy atrás y
-   llevan un `delay` imposible (−50 min). Se descartan.
+4. **El feed arrastra registros caducados**: llevan un `delay` imposible (−50 min) y
+   las horas congeladas donde se quedaron. Se reconocen porque la parada que
+   *declaran* como próxima quedó muy atrás, o porque su viaje ya terminó — nunca por
+   la primera parada del recorrido, que es el error del punto 1. El margen es
+   holgado (15 min) a propósito: un ETA que tarda en refrescarse es normal, y pasarse
+   de estricto aquí borra trenes que sí existen.
+
+Los dos primeros puntos se comprueban sin red con `npm test`: `test/stopBoard.test.mjs`
+monta el caso de Arenys de Mar con la API simulada y espera los cuatro trenes, no uno.
 
 Además, las horas vienen **en hora de Barcelona y sin zona horaria**, así que el reloj
 que se muestra sale de `requestedAt` de la API, no del servidor.

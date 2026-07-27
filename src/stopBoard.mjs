@@ -9,10 +9,13 @@
 //      La programada se obtiene restando `delay`, nunca al revés.
 //   2. El feed arrastra registros caducados, con la próxima parada del tren muy
 //      en el pasado y un `delay` imposible. Sus horas no valen: se descartan.
+//      Cómo se distingue un caducado de un tren en marcha está en `tren.mjs`:
+//      `stations[]` es el recorrido completo, así que su primer elemento es el
+//      origen y darlo por "próxima parada" borraba del tablero todo tren que
+//      llevara rodando más de tres minutos.
 
 import { getDepartures, getStations, getLine } from "./api.mjs";
-
-const parseHora = (s) => (s ? new Date(s).getTime() : NaN);
+import { parseHora, registroCaducado } from "./tren.mjs";
 const hhmm = (s) => (s ? String(s).slice(11, 16) : null);
 
 function addMinToHHMM(hhmmStr, min) {
@@ -22,7 +25,6 @@ function addMinToHHMM(hhmmStr, min) {
   return String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0");
 }
 
-const MIN_CADUCADO = -3; // la próxima parada del tren ya pasó hace tanto → registro muerto
 const MIN_PASADO = -1;   // ya salió de esta parada → fuera del panel
 
 // Sentido de circulación visto desde ESTA parada.
@@ -81,10 +83,8 @@ export async function getSalidasParada(stationId, { linea = null, sentido = null
     const codigo = t.line?.id || t.line;
     if (linea && codigo !== linea) continue;
 
-    // Salud del registro: se juzga por la próxima parada del propio tren.
-    const siguiente = (t.stations || [])[0];
-    const etaSiguiente = parseHora(siguiente?.arrivalDateHour || siguiente?.departureDateHour);
-    if (Number.isFinite(etaSiguiente) && (etaSiguiente - nowRef) / 60_000 < MIN_CADUCADO) {
+    // Salud del registro: la próxima parada que declara la API y el final del viaje.
+    if (registroCaducado(t, nowRef)) {
       caducados++;
       continue;
     }
