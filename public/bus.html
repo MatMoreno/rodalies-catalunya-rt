@@ -21,7 +21,7 @@
       <a href="/" class="navlink">Mi parada</a>
       <a href="/estado.html" class="navlink">Estado</a>
       <a href="/linea.html" class="navlink">Trenes en vivo</a>
-      <a href="/bus.html" class="navlink is-active">Buses</a>
+      <a href="/bus.html" class="navlink is-active" data-bus hidden>Buses</a>
     </nav>
     <div class="topbar__meta">
       <span class="live" id="live"><span class="live__dot"></span><span>En vivo</span></span>
@@ -693,6 +693,19 @@
         } else if (e.key === "Escape") cerrarOpciones();
       });
       $("clear").onclick = () => { $("q").value = ""; $("clear").hidden = true; $("q").focus(); pintarOpciones(""); };
+
+      // Esta página sigue en el repo con el modo bus apagado, así que puede
+      // abrirse por un enlace guardado. Se dice qué pasa y cómo encenderlo, en
+      // vez de dejar un buscador que no encuentra nada nunca.
+      if (!(await window.RR.bus)) {
+        $("picker").hidden = true;
+        $("deps").innerHTML = `<div class="empty">
+          <div class="empty__icon" style="background:var(--wash-2);color:var(--ink-3)">🚏</div>
+          <p><b>El modo bus está apagado en este servidor.</b><br>
+          Está terminado, pero todavía sin enseñar: le falta un repaso.
+          Para encenderlo, pon <code>BUS=1</code> en el <code>.env</code> y reinicia.</p></div>`;
+        return;
+      }
 
       if (!(await esperarFeed())) return;
 

@@ -24,6 +24,18 @@ try {
   // Sin .env se funciona igual, solo que sin la mitad de TMB.
 }
 
+// --- Modo bus: terminado, pero todavía sin enseñar ---
+//
+// Toda la parte de autobuses queda detrás de esta bandera, APAGADA por defecto.
+// Dos razones, ninguna de código: le falta el repaso en navegador, y no tiene
+// sentido que quien clone el repo para ver los trenes se baje 25 MB de horarios
+// y sostenga 90 MB de RSS por una pantalla que no se está enseñando.
+//
+// Apagada no queda a medias: no se registran las rutas /api/bus/*, no se descarga
+// el GTFS y el enlace del menú no aparece (así no hay enlaces muertos). Con
+// BUS=1 en .env vuelve entera, sin tocar una línea de código.
+export const BUS_ACTIVO = /^(1|true|on|si|sí)$/i.test((process.env.BUS || "").trim());
+
 // --- TMB (buses urbanos de Barcelona, tiempo real) ---
 // Claves gratuitas de developer.tmb.cat. Sin ellas, TODA la parte de TMB se
 // apaga sola y la app sigue dando los interurbanos completos.

@@ -110,6 +110,25 @@
     return r.json();
   }
 
+  /* ------------------------------------------------ ¿está el modo bus encendido?
+
+     El modo bus se enciende en el servidor (BUS=1), así que la web tiene que
+     preguntarlo: el enlace del menú viene oculto en el HTML y solo se enseña si
+     hay algo detrás. Preferimos eso a un enlace que lleva a una pantalla que no
+     puede cargar nada.
+
+     Una sola petición por página, compartida por quien la necesite (el menú y el
+     bloque de buses cercanos del panel de tren). Si falla, se decide que no. */
+  const bus = fetch("/api/bus/activo")
+    .then((r) => (r.ok ? r.json() : { activo: false }))
+    .then((j) => !!j.activo)
+    .catch(() => false);
+
+  bus.then((activo) => {
+    if (!activo) return;
+    document.querySelectorAll("[data-bus]").forEach((el) => el.removeAttribute("hidden"));
+  });
+
   w.RR = { COLORES, color, esc, textOn, mix, tint, bullet, timeAgo, clockAt, getJSON,
-           PALETA_BUS, colorBus, bulletBus };
+           PALETA_BUS, colorBus, bulletBus, bus };
 })(window);

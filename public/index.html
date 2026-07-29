@@ -21,7 +21,7 @@
       <a href="/" class="navlink is-active">Mi parada</a>
       <a href="/estado.html" class="navlink">Estado</a>
       <a href="/linea.html" class="navlink">Trenes en vivo</a>
-      <a href="/bus.html" class="navlink">Buses</a>
+      <a href="/bus.html" class="navlink" data-bus hidden>Buses</a>
     </nav>
     <div class="topbar__meta">
       <span class="live" id="live"><span class="live__dot"></span><span>En vivo</span></span>
@@ -190,6 +190,9 @@
     // del feed de Rodalies, ni tapar el tablero de trenes, que sí funciona.
     async function cargarBuses(estacionId) {
       $("sec-bus").hidden = true;
+      // Con el modo bus apagado no se pregunta nada: ni petición ni 404 en la
+      // consola de quien solo viene por los trenes.
+      if (!(await window.RR.bus)) return;
       try {
         const j = await getJSON(`/api/parada/${encodeURIComponent(estacionId)}/buses?radio=400&limite=6`);
         // Si mientras llegaba la respuesta se ha cambiado de estación, sobra.

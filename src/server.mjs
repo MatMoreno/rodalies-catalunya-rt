@@ -8,6 +8,7 @@ import { getLines, getStations } from "./api.mjs";
 import { getLineaEnVivo } from "./liveLine.mjs";
 import { getSalidasParada } from "./stopBoard.mjs";
 import { asegurarIndice } from "./gtfsIndex.mjs";
+import { BUS_ACTIVO } from "./config.mjs";
 import {
   getEstadoBus, buscarParadasBus, getParadaBus,
   getSalidasParadaBus, getParadasBusCercaEstacion,
@@ -97,6 +98,21 @@ app.get("/api/parada/:id/salidas", wrap(async (req, res) => {
 }));
 
 // --- BUS: horarios (GTFS de la Generalitat) + tiempo real (iBus de TMB) ---
+//
+// Todo esto vive detrás de `BUS_ACTIVO`, que viene apagado (ver config.mjs).
+
+// La única ruta de bus que responde siempre: dice si el modo está encendido.
+// La web la usa para enseñar u ocultar el enlace del menú, así que tiene que
+// contestar también con la bandera apagada, y sin dar un 404 que ensucie la
+// consola del navegador cada vez que se carga una página.
+app.get("/api/bus/activo", (_req, res) => res.json({ activo: BUS_ACTIVO }));
+
+// Con el modo apagado, el resto de la superficie de bus deja de existir: un 404
+// limpio en la puerta, en vez de un `if` repetido en cada una de las ocho rutas.
+app.use(["/api/bus", "/api/parada/:id/buses"], (_req, res, next) => {
+  if (BUS_ACTIVO) return next();
+  res.status(404).json({ error: "El modo bus está desactivado en este servidor" });
+});
 
 // Estado del feed de bus: si está listo, de cuándo es y hasta cuándo vale.
 // Responde AL MOMENTO aunque se esté descargando, para que la web pueda pintar
@@ -178,6 +194,12 @@ app.use(express.static(join(__dirname, "..", "public")));
 
 app.listen(PORT, () => {
   console.log(`Rodalies RT en http://localhost:${PORT}`);
+  if (!BUS_ACTIVO) {
+    // Se dice en el arranque para que nadie busque el error en otra parte: la
+    // ausencia de buses es una decisión, no una avería.
+    console.log("Modo bus apagado · BUS=1 en .env para encenderlo");
+    return;
+  }
   // El GTFS de bus son 25 MB: se baja en segundo plano y DESPUÉS de escuchar.
   // Si esto bloqueara el arranque, la parte de trenes —que ya funcionaba— se
   // quedaría esperando a los autobuses para dar señales de vida.

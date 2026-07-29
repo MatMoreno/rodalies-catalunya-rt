@@ -1,10 +1,28 @@
 # Rodalies Catalunya · Estado en tiempo real
 
-Servicio que responde **"¿a qué hora pasa mi tren —o mi bus— por mi parada?"** en
-Catalunya, y muestra el **estado del servicio e incidencias por línea** de Rodalies
-(R1–R17, RG1, RT…) en tiempo real.
+Servicio que responde **"¿a qué hora pasa mi tren por mi parada?"** en Catalunya, y
+muestra el **estado del servicio e incidencias por línea** de Rodalies (R1–R17, RG1,
+RT…) en tiempo real. Sin base de datos, sin build, con dos dependencias: Express y
+el descodificador de GTFS-Realtime.
 
-Cuatro fuentes:
+Node ≥ 18 (usa `fetch` nativo). `npm install && npm start` y ya está.
+
+## Qué hay dentro
+
+| Parte | Estado | Fuente |
+|---|---|---|
+| **Próximos trenes desde tu parada** (`/`) | funcionando | API oficial de Rodalies (GRS) |
+| **Estado e incidencias por línea** (`/estado.html`) | funcionando | GTFS-Realtime de Renfe |
+| **Trenes en vivo sobre la línea** (`/linea.html`) | funcionando | API oficial de Rodalies (GRS) |
+| **Buses: horarios + tiempo real** (`/bus.html`) | terminado, **apagado por defecto** | GTFS de la Generalitat + iBus de TMB |
+
+El **modo bus está entero y probado, pero no se enseña**: le falta un repaso en
+navegador, y no tiene sentido que quien clone esto para ver los trenes se baje 25 MB
+de horarios de bus. Vive detrás de una bandera: `BUS=1` en el `.env` y aparece el
+enlace *Buses* en el menú con todo lo que hay debajo. Apagada, la app no registra
+sus rutas, no descarga el feed y no enseña ningún enlace muerto.
+
+Las cuatro fuentes:
 
 1. **Estado / incidencias por línea** → GTFS-Realtime de Renfe (`alerts.pb`, núcleo 51).
 2. **Posición de cada tren en vivo** (entre qué paradas está + ETA a la siguiente)
@@ -14,6 +32,28 @@ Cuatro fuentes:
    Generalitat**, sin autenticación. Horario publicado, no tiempo real.
 4. **Buses urbanos de Barcelona en tiempo real** → **iBus de TMB**, con claves
    gratuitas *opcionales* (ver [Buses](#buses-interurbanos--tmb)).
+
+## Mapa del código
+
+Un asunto por fichero, sin capas de más. Los de bus solo se usan con `BUS=1`.
+
+| Fichero | De qué se ocupa |
+|---|---|
+| [`src/server.mjs`](src/server.mjs) | Rutas HTTP y estáticos. Nada de lógica: solo recorta parámetros y delega |
+| [`src/api.mjs`](src/api.mjs) | Cliente de la API oficial de Rodalies (GRS) + caché |
+| [`src/rodalies.mjs`](src/rodalies.mjs) | GTFS-Realtime de Renfe → incidencias y estado por línea |
+| [`src/stopBoard.mjs`](src/stopBoard.mjs) | Salidas de una estación, con el sentido deducido del orden de la línea |
+| [`src/liveLine.mjs`](src/liveLine.mjs) | Trenes situados entre paradas para el diagrama de línea |
+| [`src/cache.mjs`](src/cache.mjs) | La factoría `cached(ttl)`, compartida por todos los clientes |
+| [`src/config.mjs`](src/config.mjs) | Lector de `.env` de diez líneas; exporta valores ya resueltos |
+| [`src/tiempo.mjs`](src/tiempo.mjs) | Reloj de la red y día de servicio GTFS. La parte que falla en silencio |
+| [`src/geo.mjs`](src/geo.mjs) | Haversine, caja de recorte y normalización de texto |
+| [`src/unzip.mjs`](src/unzip.mjs) | Lector ZIP mínimo: infla una entrada a la vez sobre un descriptor |
+| [`src/gtfsFeed.mjs`](src/gtfsFeed.mjs) | Descarga del GTFS, caché en disco e intercambio atómico |
+| [`src/gtfsIndex.mjs`](src/gtfsIndex.mjs) | Índice en typed arrays y todas las consultas sobre él |
+| [`src/tmb.mjs`](src/tmb.mjs) | Cliente de TMB (iBus, paradas, líneas). Sin claves se apaga solo |
+| [`src/busBoard.mjs`](src/busBoard.mjs) | Junta las dos redes de bus en una sola forma de respuesta |
+| [`public/`](public/) | Cuatro páginas sin framework + `shared.js` + un solo `styles.css` |
 
 ## Qué da cada fuente (verificado en vivo)
 
@@ -40,19 +80,34 @@ npm test               # pruebas sin red (API simulada)
 - `/`             → **próximos trenes desde tu parada** (la vista principal: a qué
   hora pasa cada tren por tu estación y cuántos minutos faltan).
   `?p=79404` abre una parada concreta; la última elegida se recuerda.
-  Al final, si hay paradas de bus a menos de 400 m, aparecen listadas.
-- `/bus.html`     → **próximos buses desde tu parada de bus**, o el **recorrido de
-  una línea**. El buscador es el mismo para las dos cosas: escribe *Meridiana* y
-  salen paradas, escribe *N82* y sale la línea.
-  `?p=gen:PF08019187` (parada interurbana) · `?p=tmb:1240` (urbana de Barcelona) ·
-  `?l=N82` (recorrido de una línea).
 - `/estado.html`  → panel de incidencias/estado por línea.
 - `/linea.html`   → trenes en vivo sobre el diagrama de la línea.
   - `?l=R2` selecciona línea · `?demo=1` inyecta trenes de prueba (para verla fuera de horario).
 
+No hace falta ninguna credencial para nada de lo anterior.
+
+### Encender los buses
+
+```bash
+cp .env.example .env   # y poner BUS=1
+npm start
+```
+
+Aparece *Buses* en el menú, y con él:
+
+- `/bus.html`     → **próximos buses desde tu parada de bus**, o el **recorrido de
+  una línea**. El buscador es el mismo para las dos cosas: escribe *Meridiana* y
+  salen paradas, escribe *N82* y sale la línea. Cada fila del tablero se despliega
+  para ver el recorrido completo de **ese** autobús.
+  `?p=gen:PF08019187` (parada interurbana) · `?p=tmb:1240` (urbana de Barcelona) ·
+  `?l=N82` (recorrido de una línea).
+- En `/`, al final, las paradas de bus a menos de 400 m de la estación elegida.
+
 La primera vez, el horario de bus (25 MB) se descarga en segundo plano **después**
 de que el servidor empiece a escuchar: la parte de trenes responde desde el primer
-instante y `/bus.html` enseña un aviso mientras se prepara.
+instante y `/bus.html` enseña un aviso mientras se prepara. Los interurbanos van sin
+credenciales; el tiempo real de Barcelona necesita las claves gratuitas de TMB (y sin
+ellas todo lo demás sigue funcionando).
 
 ## API (proxy local, evita CORS)
 
@@ -65,8 +120,10 @@ instante y `/bus.html` enseña un aviso mientras se prepara.
 - `GET /api/linea/:id/vivo` — paradas ordenadas + trenes situados entre paradas.
   Separa `trenes` (circulando) de `proximas_salidas` (aún sin salir). `?demo=1` para datos sintéticos.
 
-Bus:
+Bus (**solo con `BUS=1`**; apagado, todas devuelven 404 salvo la primera):
 
+- `GET /api/bus/activo` — `{ activo: true|false }`. Responde siempre: es lo que usa la
+  web para enseñar u ocultar el enlace del menú sin dejarlo muerto.
 - `GET /api/bus/estado` — si el horario está listo, de cuándo es y hasta cuándo vale.
   Responde al instante incluso mientras se descarga. `?force=1` comprueba si hay versión nueva.
 - `GET /api/bus/buscar` — buscador único: devuelve `lineas[]` **y** `paradas[]`, más
@@ -135,6 +192,9 @@ línea** (como la señalética). La lista se agrupa por sentido y cada fila decl
 **destino real**, que puede ser un punto intermedio de ese sentido.
 
 ## Buses: interurbanos + TMB
+
+> Esta parte viene **apagada**: `BUS=1` en el `.env` para encenderla. Lo que sigue
+> describe lo que hay detrás de la bandera.
 
 ### Sin claves, la mitad interurbana está completa
 
