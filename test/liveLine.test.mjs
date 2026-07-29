@@ -6,9 +6,9 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 
-const AHORA = "2026-07-27T07:55:00";
-const t0 = Date.parse(AHORA);
-const min = (m) => new Date(t0 + m * 60_000).toISOString().slice(0, 19);
+// El momento y el formateo de horas viven en un solo sitio (ver momento.mjs):
+// tres copias de la misma línea eran tres copias del mismo error.
+import { MOMENTO as AHORA, t0, min } from "./momento.mjs";
 
 const LINEA = {
   id: "R1", name: "R1", origin: "P1", destination: "P6",

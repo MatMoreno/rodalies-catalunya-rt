@@ -42,6 +42,7 @@ Un asunto por fichero, sin capas de más. Los de bus solo se usan con `BUS=1`.
 | [`src/server.mjs`](src/server.mjs) | Rutas HTTP y estáticos. Nada de lógica: solo recorta parámetros y delega |
 | [`src/api.mjs`](src/api.mjs) | Cliente de la API oficial de Rodalies (GRS) + caché |
 | [`src/rodalies.mjs`](src/rodalies.mjs) | GTFS-Realtime de Renfe → incidencias y estado por línea |
+| [`src/tren.mjs`](src/tren.mjs) | Cómo se lee UN tren del feed: su próxima parada y si el registro caducó |
 | [`src/stopBoard.mjs`](src/stopBoard.mjs) | Salidas de una estación, con el sentido deducido del orden de la línea |
 | [`src/liveLine.mjs`](src/liveLine.mjs) | Trenes situados entre paradas para el diagrama de línea |
 | [`src/cache.mjs`](src/cache.mjs) | La factoría `cached(ttl)`, compartida por todos los clientes |
@@ -54,6 +55,7 @@ Un asunto por fichero, sin capas de más. Los de bus solo se usan con `BUS=1`.
 | [`src/tmb.mjs`](src/tmb.mjs) | Cliente de TMB (iBus, paradas, líneas). Sin claves se apaga solo |
 | [`src/busBoard.mjs`](src/busBoard.mjs) | Junta las dos redes de bus en una sola forma de respuesta |
 | [`public/`](public/) | Cuatro páginas sin framework + `shared.js` + un solo `styles.css` |
+| [`test/`](test/) | Pruebas sin red (`npm test`), con la API simulada y un momento fijo |
 
 ## Qué da cada fuente (verificado en vivo)
 
@@ -74,7 +76,7 @@ Un asunto por fichero, sin capas de más. Los de bus solo se usan con `BUS=1`.
 ```bash
 npm install
 npm start              # http://localhost:3020  (PORT para cambiarlo)
-npm test               # pruebas sin red (API simulada)
+npm test               # pruebas sin red (API simulada), en cualquier zona horaria
 ```
 
 - `/`             → **próximos trenes desde tu parada** (la vista principal: a qué

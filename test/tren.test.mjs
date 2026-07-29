@@ -7,8 +7,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { proximaParada, registroCaducado } from "../src/tren.mjs";
 
-const AHORA = Date.parse("2026-07-27T07:55:00");
-const min = (m) => new Date(AHORA + m * 60_000).toISOString().slice(0, 19);
+// El momento y el formateo de horas viven en un solo sitio (ver momento.mjs):
+// tres copias de la misma línea eran tres copias del mismo error.
+import { t0 as AHORA, min } from "./momento.mjs";
 
 // Recorrido completo: paradas ya servidas incluidas, que es como viene de la API.
 const tren = ({ paradas, next }) => ({
